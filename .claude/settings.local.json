@@ -39,7 +39,8 @@
       "Bash(docker-compose:*)",
       "Bash(go build:*)",
       "Bash(npm install)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(npm install:*)"
     ],
     "deny": []
   }
