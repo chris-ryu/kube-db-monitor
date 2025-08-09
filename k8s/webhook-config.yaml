@@ -1,0 +1,41 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionWebhook
+metadata:
+  name: kubedb-monitor-mutating-webhook
+webhooks:
+- name: pod-injector.kubedb.monitor
+  clientConfig:
+    service:
+      name: kubedb-monitor-controller
+      namespace: kubedb-monitor
+      path: /mutate
+  rules:
+  - apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]
+    operations: ["CREATE"]
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  failurePolicy: Fail
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionWebhook
+metadata:
+  name: kubedb-monitor-validating-webhook
+webhooks:
+- name: pod-validator.kubedb.monitor
+  clientConfig:
+    service:
+      name: kubedb-monitor-controller
+      namespace: kubedb-monitor
+      path: /validate
+  rules:
+  - apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]
+    operations: ["CREATE", "UPDATE"]
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  failurePolicy: Fail
+  timeoutSeconds: 10

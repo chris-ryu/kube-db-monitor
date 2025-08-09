@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: kubedb-monitor-test-service
+  namespace: kubedb-monitor-test
+subsets:
+- addresses:
+  - ip: 10.10.235.166  # university-registration pod IP
+  ports:
+  - port: 8080
+    protocol: TCP

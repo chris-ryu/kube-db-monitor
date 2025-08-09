@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-monitored
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-monitored
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-monitored
+  template:
+    metadata:
+      labels:
+        app: university-registration-monitored
+      annotations:
+        # KubeDB Monitor는 수동으로 주입됨
+        kubedb.monitor/enable: "manual"
+        kubedb.monitor/db-types: "h2"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["sh", "-c"]
+        args: ["cp /opt/kubedb-monitor-agent.jar /opt/kubedb-agent/"]
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "development"
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=200,collector-type=logging"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        - name: SPRING_DATASOURCE_DRIVERCLASSNAME
+          value: "org.h2.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "sa"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: ""
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      imagePullSecrets:
+      - name: registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-monitored-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-monitored
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-monitored
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: university-registration-monitored-ingress
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-monitored
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: university-registration.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: university-registration-monitored-service
+            port:
+              number: 80

@@ -1,0 +1,232 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubedb-monitor-system
+  labels:
+    name: kubedb-monitor-system
+    app: kubedb-monitor
+    environment: production
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubedb-monitor-controller
+  namespace: kubedb-monitor-system
+  labels:
+    app: kubedb-monitor-controller
+    component: webhook
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kubedb-monitor-controller
+  template:
+    metadata:
+      labels:
+        app: kubedb-monitor-controller
+        component: webhook
+    spec:
+      serviceAccountName: kubedb-monitor-controller
+      containers:
+      - name: controller
+        image: registry.bitgaram.info/kubedb-monitor/controller:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8443
+          name: webhook
+          protocol: TCP
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        env:
+        - name: TLS_CERT_FILE
+          value: /etc/webhook/certs/tls.crt
+        - name: TLS_PRIVATE_KEY_FILE
+          value: /etc/webhook/certs/tls.key
+        - name: WEBHOOK_SERVICE_NAME
+          value: kubedb-monitor-webhook-service
+        - name: WEBHOOK_SERVICE_NAMESPACE
+          value: kubedb-monitor-system
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: webhook-certs
+          mountPath: /etc/webhook/certs
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: kubedb-monitor-webhook-certs
+      imagePullSecrets:
+      - name: registry-secret
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubedb-monitor-webhook-service
+  namespace: kubedb-monitor-system
+  labels:
+    app: kubedb-monitor-controller
+spec:
+  type: ClusterIP
+  ports:
+  - name: webhook
+    port: 443
+    targetPort: 8443
+    protocol: TCP
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: kubedb-monitor-controller
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubedb-monitor-webhook-ingress
+  namespace: kubedb-monitor-system
+  labels:
+    app: kubedb-monitor-controller
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  tls:
+  - hosts:
+    - kubedb-monitor-webhook.bitgaram.info
+    secretName: kubedb-monitor-webhook-tls
+  rules:
+  - host: kubedb-monitor-webhook.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubedb-monitor-webhook-service
+            port:
+              number: 443
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubedb-monitor-controller
+  namespace: kubedb-monitor-system
+  labels:
+    app: kubedb-monitor-controller
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubedb-monitor-controller
+  labels:
+    app: kubedb-monitor-controller
+rules:
+- apiGroups: [""]
+  resources: ["pods", "namespaces"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["admissionregistration.k8s.io"]
+  resources: ["mutatingadmissionwebhooks", "validatingadmissionwebhooks"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubedb-monitor-controller
+  labels:
+    app: kubedb-monitor-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubedb-monitor-controller
+subjects:
+- kind: ServiceAccount
+  name: kubedb-monitor-controller
+  namespace: kubedb-monitor-system
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionWebhook
+metadata:
+  name: kubedb-monitor-webhook
+  labels:
+    app: kubedb-monitor-controller
+webhooks:
+- name: kubedb-monitor.webhook.io
+  clientConfig:
+    url: https://kubedb-monitor-webhook.bitgaram.info/mutate
+    # caBundle will be filled by cert-manager or manual process
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]
+  failurePolicy: Ignore
+  sideEffects: None
+  admissionReviewVersions: ["v1", "v1beta1"]
+  namespaceSelector:
+    matchExpressions:
+    - key: name
+      operator: NotIn
+      values: ["kube-system", "kube-public", "kubedb-monitor-system"]
+
+---
+# SSL Certificate for webhook (using cert-manager)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kubedb-monitor-webhook-cert
+  namespace: kubedb-monitor-system
+spec:
+  secretName: kubedb-monitor-webhook-certs
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: kubedb-monitor-webhook.bitgaram.info
+  dnsNames:
+  - kubedb-monitor-webhook.bitgaram.info

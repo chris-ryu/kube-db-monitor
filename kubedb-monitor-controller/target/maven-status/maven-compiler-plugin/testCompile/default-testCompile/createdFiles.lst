@@ -1,0 +1,3 @@
+io/kubedb/monitor/controller/webhook/AdmissionWebhookServiceTest.class
+io/kubedb/monitor/controller/KubeDBControllerApplicationTest.class
+io/kubedb/monitor/controller/webhook/MutatingAdmissionControllerTest.class

@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Primary Colors */
+  --color-primary: #00ff88;
+  --color-secondary: #0099ff;
+  --color-accent: #ff6b35;
+  
+  /* Status Colors */
+  --color-success: #00ff88;
+  --color-warning: #ffab00;
+  --color-error: #ff5252;
+  --color-info: #2196f3;
+  
+  /* Background */
+  --bg-dark: #0a0a0a;
+  --bg-surface: #1a1a1a;
+  --bg-elevated: #2a2a2a;
+  
+  /* Text */
+  --text-primary: #ffffff;
+  --text-secondary: #b0b0b0;
+  --text-muted: #666666;
+}
+
+body {
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Animation utilities */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 5px rgba(0, 255, 136, 0.5);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.8);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+/* Query performance classes */
+.query-fast {
+  border-color: var(--color-success) !important;
+  background-color: rgba(0, 255, 136, 0.1) !important;
+}
+
+.query-medium {
+  border-color: var(--color-warning) !important;
+  background-color: rgba(255, 171, 0, 0.1) !important;
+}
+
+.query-slow {
+  border-color: var(--color-error) !important;
+  background-color: rgba(255, 82, 82, 0.1) !important;
+}
+
+.query-error {
+  border-color: var(--color-error) !important;
+  background-color: rgba(255, 82, 82, 0.2) !important;
+  animation: pulse-glow 2s infinite;
+}
+
+/* Metric card animations */
+.metric-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.metric-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Connection status indicators */
+.status-connecting {
+  animation: pulse 2s infinite;
+}
+
+.status-connected {
+  color: var(--color-success);
+}
+
+.status-error {
+  color: var(--color-error);
+  animation: pulse-glow 1s infinite;
+}
+
+/* Trend graph animations */
+.trend-up {
+  stroke: var(--color-success);
+}
+
+.trend-down {
+  stroke: var(--color-error);
+}
+
+.trend-stable {
+  stroke: var(--color-info);
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, #333 25%, #555 50%, #333 75%);
+  background-size: 200px 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Flow animation styles */
+.query-flow-animation {
+  position: relative;
+  overflow: hidden;
+}
+
+.flow-diagram {
+  position: relative;
+  z-index: 1;
+}
+
+.active-queries {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .metric-card {
+    padding: 1rem;
+  }
+  
+  .flow-diagram {
+    flex-direction: column;
+    gap: 1rem;
+  }
+}

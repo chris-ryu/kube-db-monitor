@@ -1,0 +1,5 @@
+/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-common/src/test/java/io/kubedb/monitor/common/metrics/DBMetricsTest.java
+/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-common/src/test/java/io/kubedb/monitor/common/metrics/LoggingMetricsCollectorTest.java
+/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-common/src/test/java/io/kubedb/monitor/common/metrics/InMemoryMetricsCollectorTest.java
+/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-common/src/test/java/io/kubedb/monitor/common/metrics/MetricsCollectorFactoryTest.java
+/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-common/src/test/java/io/kubedb/monitor/common/metrics/JmxMetricsCollectorTest.java

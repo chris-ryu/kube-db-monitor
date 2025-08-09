@@ -1,0 +1,312 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+    version: v1.0.0
+    component: sample-app
+    managed-by: kubedb-monitor
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: university-registration
+  template:
+    metadata:
+      labels:
+        app: university-registration
+        version: v1.0.0
+      annotations:
+        # KubeDB Monitor 활성화 및 설정
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2"
+        kubedb.monitor/sampling-rate: "1.0"
+        kubedb.monitor/slow-query-threshold: "200"
+        kubedb.monitor/collector-type: "logging"
+        kubedb.monitor/metrics-format: "json"
+        
+        # 추가 모니터링 설정
+        kubedb.monitor/batch-size: "100"
+        kubedb.monitor/flush-interval: "5s"
+        kubedb.monitor/enable-stack-trace: "true"
+        kubedb.monitor/log-level: "DEBUG"
+        
+        # Prometheus 스크래핑 활성화
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: university-registration
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "kubernetes"
+        - name: JAVA_OPTS
+          value: "-Xmx2g -Xms1g -XX:+UseG1GC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps"
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: university-registration-secret
+              key: admin-password
+        - name: SERVER_PORT
+          value: "8080"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8080
+          initialDelaySeconds: 90
+          periodSeconds: 30
+          timeoutSeconds: 15
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 15
+        volumeMounts:
+        - name: logs-volume
+          mountPath: /app/logs
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: logs-volume
+        persistentVolumeClaim:
+          claimName: university-registration-logs
+      - name: config-volume
+        configMap:
+          name: university-registration-config
+      imagePullSecrets:
+      - name: registry-secret
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/actuator/prometheus"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: university-registration-ingress
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - university-registration.bitgaram.info
+    secretName: university-registration-tls
+  rules:
+  - host: university-registration.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: university-registration-service
+            port:
+              number: 80
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: university-registration-logs
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: gp2
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: university-registration
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+    
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: university-registration-secret
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+type: Opaque
+data:
+  admin-password: YWRtaW4xMjM=  # admin123 base64 encoded
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: university-registration-config
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+data:
+  application-kubernetes.yml: |
+    spring:
+      profiles:
+        active: kubernetes
+      datasource:
+        url: jdbc:h2:mem:coursedb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MYSQL
+        hikari:
+          maximum-pool-size: 50
+          minimum-idle: 10
+          connection-timeout: 30000
+      jpa:
+        show-sql: false
+        properties:
+          hibernate:
+            generate_statistics: true
+            jdbc:
+              batch_size: 100
+    
+    server:
+      port: 8080
+      
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: "health,info,metrics,prometheus,env,configprops"
+      endpoint:
+        health:
+          show-details: always
+          probes:
+            enabled: true
+      metrics:
+        export:
+          prometheus:
+            enabled: true
+            
+    app:
+      registration:
+        initialize-sample-data: true
+        data-init-batch-size: 500
+        max-concurrent-enrollments: 100
+        
+    logging:
+      level:
+        com.university.registration: INFO
+        io.kubedb.monitor: DEBUG
+        org.hibernate.SQL: INFO
+      pattern:
+        console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{traceId:-},%X{spanId:-}] %logger{40} - %msg%n"
+        
+  logback-spring.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <configuration>
+        <springProfile name="kubernetes">
+            <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+                <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                    <includeContext>true</includeContext>
+                    <includeMdc>true</includeMdc>
+                    <customFields>{"service":"university-registration","environment":"production"}</customFields>
+                </encoder>
+            </appender>
+            
+            <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>/app/logs/application.log</file>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <fileNamePattern>/app/logs/application.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+                    <maxFileSize>500MB</maxFileSize>
+                    <maxHistory>7</maxHistory>
+                    <totalSizeCap>2GB</totalSizeCap>
+                </rollingPolicy>
+                <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                    <includeContext>true</includeContext>
+                    <includeMdc>true</includeMdc>
+                    <customFields>{"service":"university-registration","environment":"production"}</customFields>
+                </encoder>
+            </appender>
+            
+            <logger name="com.university.registration" level="INFO"/>
+            <logger name="org.hibernate.SQL" level="DEBUG"/>
+            <logger name="io.kubedb.monitor" level="DEBUG"/>
+            
+            <root level="INFO">
+                <appender-ref ref="CONSOLE"/>
+                <appender-ref ref="FILE"/>
+            </root>
+        </springProfile>
+    </configuration>

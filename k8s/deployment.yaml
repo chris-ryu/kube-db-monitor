@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubedb-monitor-controller
+  namespace: kubedb-monitor
+  labels:
+    app: kubedb-monitor-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubedb-monitor-controller
+  template:
+    metadata:
+      labels:
+        app: kubedb-monitor-controller
+    spec:
+      serviceAccountName: kubedb-monitor-controller
+      imagePullSecrets:
+      - name: kubedb-monitor-registry-secret
+      containers:
+      - name: controller
+        image: registry.bitgaram.info/kubedb-monitor/controller:latest
+        ports:
+        - containerPort: 8443
+          name: webhook
+          protocol: TCP
+        env:
+        - name: WEBHOOK_CERT_DIR
+          value: /etc/certs
+        - name: KUBEDB_MONITOR_CONTROLLER_AGENT_IMAGE
+          value: registry.bitgaram.info/kubedb-monitor/agent:latest
+        volumeMounts:
+        - name: webhook-certs
+          mountPath: /etc/certs
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: kubedb-monitor-webhook-certs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubedb-monitor-controller
+  namespace: kubedb-monitor
+spec:
+  selector:
+    app: kubedb-monitor-controller
+  ports:
+  - port: 443
+    targetPort: 8443
+    protocol: TCP
+    name: webhook
+  type: ClusterIP

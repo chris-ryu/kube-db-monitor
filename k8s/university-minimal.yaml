@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-minimal
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration
+  template:
+    metadata:
+      labels:
+        app: university-registration
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2"
+    spec:
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "test"
+        - name: JAVA_OPTS
+          value: "-Xmx256m -Xms128m"
+        - name: SPRING_DATASOURCE_JDBCURL
+          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+          value: "org.h2.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "sa"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: ""
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "create-drop"
+        - name: APP_REGISTRATION_INITIALIZE_SAMPLE_DATA
+          value: "true"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "100m"
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+      imagePullSecrets:
+      - name: registry-secret

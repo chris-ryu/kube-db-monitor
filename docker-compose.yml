@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Control Plane - WebSocket server for real-time metrics
+  control-plane:
+    build: ./control-plane
+    container_name: kubedb-control-plane
+    ports:
+      - "8080:8080"
+    environment:
+      - GO_ENV=production
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - kubedb-network
+    restart: unless-stopped
+
+  # Dashboard Frontend - Next.js application  
+  dashboard:
+    build: ./dashboard-frontend
+    container_name: kubedb-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - WEBSOCKET_URL=ws://control-plane:8080/ws
+      - NEXT_PUBLIC_API_URL=http://control-plane:8080
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - kubedb-network
+    restart: unless-stopped
+
+networks:
+  kubedb-network:
+    driver: bridge
+    name: kubedb-monitor-network

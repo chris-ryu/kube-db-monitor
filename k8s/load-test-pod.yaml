@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: load-test
+  namespace: kubedb-monitor-test
+  labels:
+    app: load-test
+spec:
+  containers:
+  - name: load-test
+    image: httpd:2.4-alpine
+    command: ["sleep", "3600"]
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+  - name: curl-test  
+    image: curlimages/curl:latest
+    command: ["sleep", "3600"]
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "25m"
+      limits:
+        memory: "64Mi"
+        cpu: "50m"
+  restartPolicy: Never

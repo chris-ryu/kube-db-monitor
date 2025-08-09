@@ -1,0 +1,144 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-app
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-app
+  template:
+    metadata:
+      labels:
+        app: university-app
+      annotations:
+        # KubeDB Monitor 활성화
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2"
+        kubedb.monitor/sampling-rate: "1.0"
+        kubedb.monitor/slow-query-threshold: "100"
+        kubedb.monitor/collector-type: "logging"
+        kubedb.monitor/log-level: "DEBUG"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["sh", "-c"]
+        args: ["cp /opt/kubedb-monitor-agent.jar /opt/kubedb-agent/"]
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+      containers:
+      - name: university-app
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "test"
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=100,collector-type=logging"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:h2:mem:university;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MYSQL"
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:h2:mem:university;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MYSQL"
+        - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+          value: "org.h2.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "sa"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: ""
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "create-drop"
+        - name: SPRING_JPA_SHOW_SQL
+          value: "false"
+        - name: SPRING_H2_CONSOLE_ENABLED
+          value: "true"
+        - name: APP_REGISTRATION_INITIALIZE_SAMPLE_DATA
+          value: "true"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8080
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      imagePullSecrets:
+      - name: registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-app-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-app
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: jmx
+  selector:
+    app: university-app
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: university-app-ingress
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-app
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - university-app.bitgaram.info
+    secretName: university-app-tls
+  rules:
+  - host: university-app.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: university-app-service
+            port:
+              number: 8080

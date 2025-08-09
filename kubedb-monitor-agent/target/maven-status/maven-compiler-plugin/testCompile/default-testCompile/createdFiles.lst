@@ -1,0 +1,4 @@
+io/kubedb/monitor/agent/JDBCMonitoringIntegrationTest.class
+io/kubedb/monitor/agent/JDBCMethodInterceptorTest.class
+io/kubedb/monitor/agent/AgentConfigTest.class
+io/kubedb/monitor/agent/JDBCInterceptorTest.class

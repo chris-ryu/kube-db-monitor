@@ -1,0 +1,36 @@
+server:
+  port: 8443
+  ssl:
+    enabled: true
+    certificate: file:/etc/certs/tls.crt
+    certificate-private-key: file:/etc/certs/tls.key
+
+spring:
+  application:
+    name: kubedb-monitor-controller
+
+management:
+  server:
+    port: 8080
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    io.kubedb.monitor: DEBUG
+    org.springframework.web: INFO
+    
+# KubeDB Monitor specific configuration
+kubedb:
+  monitor:
+    controller:
+      agent-image: registry.bitgaram.info/kubedb-monitor/agent:latest
+      agent-volume-path: /opt/kubedb-agent
+      webhook:
+        timeout-seconds: 10
+        failure-policy: Fail

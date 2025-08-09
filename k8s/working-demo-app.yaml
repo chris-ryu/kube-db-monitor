@@ -1,0 +1,205 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitor-demo-app
+  namespace: kubedb-monitor-test
+  labels:
+    app: monitor-demo-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitor-demo-app
+  template:
+    metadata:
+      labels:
+        app: monitor-demo-app
+      annotations:
+        # KubeDB Monitor 활성화
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2"
+        kubedb.monitor/sampling-rate: "1.0"
+        kubedb.monitor/slow-query-threshold: "100"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["sh", "-c"]
+        args: ["cp /opt/kubedb-monitor-agent.jar /opt/kubedb-agent/"]
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+      containers:
+      - name: demo-app
+        image: openjdk:17-jdk-alpine
+        ports:
+        - containerPort: 8080
+        env:
+        - name: JAVA_OPTS
+          value: "-Xmx256m -Xms128m -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=100,collector-type=logging"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Install curl and create simple HTTP server
+          apk add --no-cache curl
+          mkdir -p /tmp/app
+          cd /tmp/app
+          
+          # Create a simple Java app that uses JDBC
+          cat > DBTestApp.java << 'EOF'
+          import java.sql.*;
+          import java.util.concurrent.*;
+          import java.io.*;
+          import java.net.*;
+          
+          public class DBTestApp {
+              private static Connection conn;
+              private static final String DB_URL = "jdbc:h2:mem:demo;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE";
+              
+              public static void main(String[] args) throws Exception {
+                  System.out.println("Demo App with KubeDB Monitor Starting...");
+                  
+                  // Initialize H2 database
+                  Class.forName("org.h2.Driver");
+                  conn = DriverManager.getConnection(DB_URL, "sa", "");
+                  
+                  // Create table
+                  try (Statement stmt = conn.createStatement()) {
+                      stmt.execute("CREATE TABLE demo_table (id INT AUTO_INCREMENT, data VARCHAR(100))");
+                      System.out.println("Demo table created");
+                  }
+                  
+                  // Start HTTP server for health checks
+                  startHttpServer();
+                  
+                  // Start database operations
+                  ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
+                  executor.scheduleAtFixedRate(() -> {
+                      try {
+                          performDatabaseOperations();
+                      } catch (Exception e) {
+                          e.printStackTrace();
+                      }
+                  }, 0, 5, TimeUnit.SECONDS);
+                  
+                  System.out.println("Demo app is running with KubeDB Monitor...");
+                  Thread.currentThread().join();
+              }
+              
+              private static void startHttpServer() throws IOException {
+                  ServerSocket serverSocket = new ServerSocket(8080);
+                  new Thread(() -> {
+                      try {
+                          while (true) {
+                              Socket clientSocket = serverSocket.accept();
+                              new Thread(() -> {
+                                  try {
+                                      PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+                                      out.println("HTTP/1.1 200 OK");
+                                      out.println("Content-Type: text/plain");
+                                      out.println();
+                                      out.println("KubeDB Monitor Demo App - Database operations running!");
+                                      clientSocket.close();
+                                  } catch (Exception e) {
+                                      e.printStackTrace();
+                                  }
+                              }).start();
+                          }
+                      } catch (Exception e) {
+                          e.printStackTrace();
+                      }
+                  }).start();
+              }
+              
+              private static void performDatabaseOperations() throws SQLException {
+                  // Insert data
+                  String insertSql = "INSERT INTO demo_table (data) VALUES (?)";
+                  try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
+                      pstmt.setString(1, "Data_" + System.currentTimeMillis());
+                      pstmt.executeUpdate();
+                  }
+                  
+                  // Select data
+                  try (Statement stmt = conn.createStatement()) {
+                      ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM demo_table");
+                      if (rs.next()) {
+                          System.out.println("Current records: " + rs.getInt(1));
+                      }
+                  }
+                  
+                  // Complex query
+                  try (Statement stmt = conn.createStatement()) {
+                      stmt.executeQuery("SELECT * FROM demo_table ORDER BY id DESC LIMIT 5");
+                  }
+              }
+          }
+          EOF
+          
+          # Download H2 JAR
+          curl -L -o h2.jar https://repo1.maven.org/maven2/com/h2database/h2/2.2.224/h2-2.2.224.jar
+          
+          # Compile and run
+          javac -cp h2.jar DBTestApp.java
+          java -cp .:h2.jar DBTestApp
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      imagePullSecrets:
+      - name: registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitor-demo-app-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: monitor-demo-app
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: monitor-demo-app
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitor-demo-app-ingress
+  namespace: kubedb-monitor-test
+  labels:
+    app: monitor-demo-app
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - monitor-demo.bitgaram.info
+    secretName: monitor-demo-tls
+  rules:
+  - host: monitor-demo.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: simple-test-app-service
+            port:
+              number: 80

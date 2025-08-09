@@ -1,0 +1,21 @@
+FROM eclipse-temurin:17-jre
+
+# Create application user for security
+RUN groupadd -r kubedb-monitor && \
+    useradd -r -g kubedb-monitor -d /opt/kubedb-agent kubedb-monitor
+
+# Create agent directory
+RUN mkdir -p /opt/kubedb-agent && \
+    chown kubedb-monitor:kubedb-monitor /opt/kubedb-agent
+
+# Copy the agent JAR
+COPY kubedb-monitor-agent/target/kubedb-monitor-agent-*.jar /opt/kubedb-agent/kubedb-monitor-agent.jar
+
+# Set permissions
+RUN chmod +r /opt/kubedb-agent/kubedb-monitor-agent.jar
+
+# Agent doesn't run as a standalone service, it's attached to Java applications
+# This container is used to provide the agent JAR to other containers via volume mounts
+USER kubedb-monitor
+
+ENTRYPOINT ["tail", "-f", "/dev/null"]

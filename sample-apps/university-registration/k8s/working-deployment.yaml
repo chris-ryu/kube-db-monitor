@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration
+  template:
+    metadata:
+      labels:
+        app: university-registration
+      annotations:
+        # KubeDB Monitor 활성화
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2"
+        kubedb.monitor/sampling-rate: "1.0"
+        kubedb.monitor/slow-query-threshold: "200"
+        kubedb.monitor/collector-type: "logging"
+        kubedb.monitor/log-level: "DEBUG"
+    spec:
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "development"
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        - name: SPRING_DATASOURCE_DRIVERCLASSNAME
+          value: "org.h2.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "sa"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: ""
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+      imagePullSecrets:
+      - name: registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubedb-monitor-test
+  namespace: kubedb-monitor-test
+  labels:
+    app: kubedb-monitor-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubedb-monitor-test
+  template:
+    metadata:
+      labels:
+        app: kubedb-monitor-test
+      annotations:
+        # KubeDB Monitor 활성화 - 이것이 핵심 테스트!
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2,mysql,postgresql"
+        kubedb.monitor/sampling-rate: "1.0"
+        kubedb.monitor/slow-query-threshold: "100"
+        kubedb.monitor/collector-type: "logging"
+        kubedb.monitor/log-level: "DEBUG"
+        kubedb.monitor/batch-size: "10"
+        kubedb.monitor/flush-interval: "5s"
+    spec:
+      containers:
+      - name: test-app
+        image: openjdk:17-jdk-slim
+        command: 
+        - /bin/bash
+        - -c
+        - |
+          echo "KubeDB Monitor Test Application Starting..."
+          echo "Checking Java version:"
+          java -version
+          echo "Listing available JARs:"
+          ls -la /usr/local/lib/ || echo "No /usr/local/lib/"
+          echo "Checking environment variables:"
+          env | grep -i java || echo "No Java env vars"
+          echo "Checking system properties:"
+          java -XshowSettings:properties -version 2>&1 | grep -i agent || echo "No agent properties"
+          echo "Application will sleep for debugging..."
+          sleep 3600
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubedb-monitor-test-service
+  namespace: kubedb-monitor-test
+spec:
+  selector:
+    app: kubedb-monitor-test
+  ports:
+  - port: 8080
+    targetPort: 8080

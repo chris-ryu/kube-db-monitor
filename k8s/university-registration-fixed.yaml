@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration
+  template:
+    metadata:
+      labels:
+        app: university-registration
+      annotations:
+        # KubeDB Monitor 활성화
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2"
+        kubedb.monitor/sampling-rate: "1.0"
+        kubedb.monitor/slow-query-threshold: "100"
+        kubedb.monitor/collector-type: "logging"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["sh", "-c"]
+        args: ["cp /opt/kubedb-monitor-agent.jar /opt/kubedb-agent/"]
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Spring Boot 프로파일 설정
+        - name: SPRING_PROFILES_ACTIVE
+          value: "development"
+        # Java 옵션과 KubeDB Agent 설정
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=100,collector-type=logging"
+        # H2 데이터베이스 설정 (올바른 URL)
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:h2:mem:coursedb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MYSQL;INIT=CREATE SCHEMA IF NOT EXISTS PUBLIC"
+        - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+          value: "org.h2.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "sa"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: ""
+        # JPA/Hibernate 설정
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "create-drop"
+        - name: SPRING_JPA_SHOW_SQL
+          value: "true"
+        - name: SPRING_JPA_DATABASE_PLATFORM
+          value: "org.hibernate.dialect.H2Dialect"
+        # H2 콘솔 활성화
+        - name: SPRING_H2_CONSOLE_ENABLED
+          value: "true"
+        - name: SPRING_H2_CONSOLE_PATH
+          value: "/h2-console"
+        # 샘플 데이터 초기화
+        - name: APP_REGISTRATION_INITIALIZE_SAMPLE_DATA
+          value: "true"
+        - name: APP_REGISTRATION_DATA_INIT_BATCH_SIZE
+          value: "50"
+        # 로깅 설정
+        - name: LOGGING_LEVEL_ORG_HIBERNATE_SQL
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_ORG_HIBERNATE_TYPE_DESCRIPTOR_SQL_BASICBINDER
+          value: "TRACE"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "DEBUG"
+        - name: LOGGING_PATTERN_CONSOLE
+          value: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        # Health check 설정 (올바른 경로)
+        livenessProbe:
+          httpGet:
+            path: /api/actuator/health
+            port: 8080
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/actuator/health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      imagePullSecrets:
+      - name: registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/api/actuator/prometheus"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration

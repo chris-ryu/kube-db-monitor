@@ -1,0 +1,196 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-demo
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-demo
+  template:
+    metadata:
+      labels:
+        app: university-registration-demo
+      annotations:
+        # KubeDB Monitor 활성화 - 데모용 설정
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "h2"
+        kubedb.monitor/sampling-rate: "1.0"
+        kubedb.monitor/slow-query-threshold: "50"
+        kubedb.monitor/collector-type: "logging"
+        kubedb.monitor/log-level: "DEBUG"
+    spec:
+      # KubeDB Agent를 수동으로 주입 (Admission Webhook가 없는 경우)
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["/bin/sh", "-c"]
+        args: 
+        - |
+          echo "Copying KubeDB Monitor Agent..."
+          cp /opt/kubedb-monitor-agent.jar /opt/kubedb-agent/
+          echo "Agent copied successfully"
+          ls -la /opt/kubedb-agent/
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Spring Boot 프로파일
+        - name: SPRING_PROFILES_ACTIVE
+          value: "development"
+        # Java 옵션과 KubeDB Agent
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=50,collector-type=logging,log-level=DEBUG"
+        
+        # HikariCP가 인식할 수 있는 올바른 환경변수 (기존 working 설정 사용)
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+          value: "org.h2.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "sa"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: ""
+        
+        # HikariCP 명시적 설정
+        - name: SPRING_DATASOURCE_HIKARI_JDBC_URL
+          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        - name: SPRING_DATASOURCE_HIKARI_DRIVER_CLASS_NAME
+          value: "org.h2.Driver"
+        - name: SPRING_DATASOURCE_HIKARI_USERNAME
+          value: "sa"
+        - name: SPRING_DATASOURCE_HIKARI_PASSWORD
+          value: ""
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "10"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "2"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        
+        # JPA/Hibernate 설정
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "create-drop"
+        - name: SPRING_JPA_SHOW_SQL
+          value: "false"
+        - name: SPRING_JPA_DATABASE_PLATFORM
+          value: "org.hibernate.dialect.H2Dialect"
+        
+        # H2 콘솔 활성화 (데모용)
+        - name: SPRING_H2_CONSOLE_ENABLED
+          value: "true"
+        - name: SPRING_H2_CONSOLE_PATH
+          value: "/h2-console"
+        
+        # 데이터 초기화 비활성화 (수동으로 데모에서 진행)
+        - name: APP_REGISTRATION_INITIALIZE_SAMPLE_DATA
+          value: "false"
+        
+        # 로깅 설정 (KubeDB 모니터링이 잘 보이도록)
+        - name: LOGGING_LEVEL_ROOT
+          value: "INFO"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_IO_KUBEDB_MONITOR
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_JDBC
+          value: "DEBUG"
+        - name: LOGGING_PATTERN_CONSOLE
+          value: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+        
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        
+        # Health check 설정
+        livenessProbe:
+          httpGet:
+            path: /api/actuator/health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5
+      
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-demo-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-demo
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-demo
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: university-registration-demo-ingress
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: university-registration.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: university-registration-demo-service
+            port:
+              number: 80

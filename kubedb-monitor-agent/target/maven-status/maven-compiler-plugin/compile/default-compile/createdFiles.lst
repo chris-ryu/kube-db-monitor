@@ -1,0 +1,7 @@
+io/kubedb/monitor/agent/StatementMethodVisitor.class
+io/kubedb/monitor/agent/AgentConfig$Builder.class
+io/kubedb/monitor/agent/KubeDBAgent.class
+io/kubedb/monitor/agent/JDBCMethodInterceptor.class
+io/kubedb/monitor/agent/JDBCInterceptor.class
+io/kubedb/monitor/agent/StatementClassVisitor.class
+io/kubedb/monitor/agent/AgentConfig.class

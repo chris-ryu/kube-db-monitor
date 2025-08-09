@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-java-app
+  namespace: default
+  labels:
+    app: example-java-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: example-java-app
+  template:
+    metadata:
+      labels:
+        app: example-java-app
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/db-types: "mysql,postgresql,h2"
+        kubedb.monitor/collector-type: "logging"
+        kubedb.monitor/slow-query-threshold: "1000"
+    spec:
+      containers:
+      - name: app
+        image: openjdk:17-jdk-slim
+        command: ["sh", "-c"]
+        args:
+        - |
+          echo 'import java.sql.*;
+          public class TestApp {
+            public static void main(String[] args) throws Exception {
+              Class.forName("org.h2.Driver");
+              while (true) {
+                try (Connection conn = DriverManager.getConnection("jdbc:h2:mem:testdb", "sa", "")) {
+                  try (Statement stmt = conn.createStatement()) {
+                    stmt.executeUpdate("CREATE TABLE IF NOT EXISTS test (id INT, name VARCHAR(100))");
+                    stmt.executeUpdate("INSERT INTO test VALUES (1, \"Test Record\")");
+                    try (ResultSet rs = stmt.executeQuery("SELECT * FROM test")) {
+                      while (rs.next()) {
+                        System.out.println("ID: " + rs.getInt(1) + ", Name: " + rs.getString(2));
+                      }
+                    }
+                  }
+                }
+                Thread.sleep(10000);
+              }
+            }
+          }' > TestApp.java &&
+          javac TestApp.java &&
+          java TestApp
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"

@@ -1,0 +1,5 @@
+io/kubedb/monitor/common/metrics/MetricsCollectorFactoryTest.class
+io/kubedb/monitor/common/metrics/LoggingMetricsCollectorTest.class
+io/kubedb/monitor/common/metrics/JmxMetricsCollectorTest.class
+io/kubedb/monitor/common/metrics/InMemoryMetricsCollectorTest.class
+io/kubedb/monitor/common/metrics/DBMetricsTest.class

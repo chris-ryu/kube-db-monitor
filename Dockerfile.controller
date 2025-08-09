@@ -1,0 +1,20 @@
+FROM eclipse-temurin:17-jre
+
+# Create application user for security
+RUN groupadd -r kubedb-monitor && \
+    useradd -r -g kubedb-monitor -d /app kubedb-monitor
+
+WORKDIR /app
+
+# Copy the controller JAR
+COPY kubedb-monitor-controller/target/kubedb-monitor-controller-*.jar app.jar
+
+# Set permissions
+RUN chown kubedb-monitor:kubedb-monitor app.jar
+
+# Expose HTTPS port for webhook
+EXPOSE 8443
+
+USER kubedb-monitor
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

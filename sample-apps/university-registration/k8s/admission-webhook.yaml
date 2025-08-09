@@ -1,0 +1,41 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionWebhookConfiguration
+metadata:
+  name: kubedb-monitor-webhook
+  labels:
+    app: kubedb-monitor
+    component: admission-webhook
+webhooks:
+- name: kubedb-monitor.bitgaram.info
+  clientConfig:
+    service:
+      name: kubedb-monitor-webhook-service
+      namespace: kubedb-monitor-system
+      path: "/mutate"
+    # cert-manager에서 관리하는 인증서 사용
+    caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUR4ekNDQXErZ0F3SUJBZ0lVWW9ia3BYVGJyVWxpS2xZRlMvZ1N2YUtlUGpzd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0dURVhNQlVHQTFVRUF3d09hM1ZpWldSaUxYZGxZbWh2YjJzd0hoY05NalV3T0RBNE1UTTFNakEyV2hjTgpNall3T0RBNE1UTTFNakEyV2pBWk1SY3dGUVlEVlFRRERBNXJkV0psWkdJdGQyVmlhRzl2YXpDQ0FTSXdEUVlKCktvWklodmNOQVFFQkJRQURnZ0VQQURDQ0FRb0NnZ0VCQUxRQkRoNEpYWW10QXVVbitpTE9EMTgzaFBGNk14emMKVnQrUmJxa3AwUWRSUHhGcnlHN3dFU2ljTmNVYks2bUxhVlgxa0YwNEZaNXRUcldpZDBWanlrT01PSFFTY2x3ZQpQSXZMWHlhTkNVRXlyd1dOYXREdHhXRGVVRHlKQVVud0NaaFRMam50T3pjcXNacURQYmk0NzVPN1gvWmw5aG9SCkgrK25hcVk2RzFsMlRRRHJaSDJVQjhCSUxXVXBLcXo4cHkwWnlMUWRjNGFvano2cEs4bGFKUDBsNzljcGtNR1EKY01uTG1XcDExRVBSbTVvRml5WTRWLzM4STFueCtVWVlBTmRpRFN4UWVJZXJHMzlpMnc2VXVLSHltUnZCT3VSMwp2MFZqR1ZhLzFrdkM2REc1R3JwL2R2d29FSzd4SDBWYW5aR09TbDhVUy9uaDZCL1FxVjBrcWdjQ0F3RUFBYU9DCkFRVXdnZ0VCTUIwR0ExVWREZ1FXQkJRRG42UDZycUdkY1dXbzZVOGttQVE1S1pjek5UQWZCZ05WSFNNRUdEQVcKZ0JRRG42UDZycUdkY1dXbzZVOGttQVE1S1pjek5UQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01JR3RCZ05WSFJFRQpnYVV3Z2FLQ1JtdDFZbVZrWWkxdGIyNXBkRzl5TFhkbFltaHZiMnN0YzJWeWRtbGpaUzVyZFdKbFpHSXRiVzl1CmFYUnZjaTF6ZVhOMFpXMHVjM1pqTG1Oc2RYTjBaWEl1Ykc5allXeUNPR3QxWW1Wa1lpMXRiMjVwZEc5eUxYZGwKWW1odmIyc3RjMlZ5ZG1salpTNXJkV0psWkdJdGJXOXVhWFJ2Y2kxemVYTjBaVzB1YzNaamdoNXJkV0psWkdJdApiVzl1YVhSdmNpMTNaV0pvYjI5ckxYTmxjblpwWTJVd0RRWUpLb1pJaHZjTkFRRUxCUUFEZ2dFQkFJeGtuM1AxClQ4RE0wSlVodzc5U1U1TmhDY1RmN2w4RG1GeHBXSE9RQkVXVlE5Sm51TEFqUWpQZllPV0xiZ05KZ0pVdzJaeTUKUzVEdXIwc08yK2gxUFBhcC9pQkVCWmQvWlQ2REN5MTViWThlcnJwb0drTXlEQS94dDdad2VEa0hhdy9CRUFNcwpYbTArM2Q2QkZmTCtraXNqYlpKUmhHcmFvd0JlY0dKbDVvam9xQi9hVExEM2gvdU1tOEFlUEt5eE9HZzBnSW9RClRnU3JkNWs3WERvYXliam52T2lLMndpbnp6ejlzR2ptbjQ2NDJLSFdSZ0pqZnVzYkszWEs2U2JBLzNFRWdwdEgKcHM5SmJPSGtEWVF5aHJBR1J2OHlweEgwYXY3TDV2em9mNnVHdUdWd0crZlRBcUlGVWhKRlNBRmw3SUlYcDBBQgpMc00zNHVJV0FjUGVrSk09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: ["apps"]
+    apiVersions: ["v1"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  admissionReviewVersions: ["v1", "v1beta1"]
+  sideEffects: None
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  # KubeDB Monitor 어노테이션이 있는 리소스만 처리
+  objectSelector:
+    matchExpressions:
+    - key: kubedb.monitor/enable
+      operator: In
+      values: ["true"]
+  # 시스템 namespace는 제외
+  namespaceSelector:
+    matchExpressions:
+    - key: name
+      operator: NotIn
+      values: ["kube-system", "kube-public", "kube-node-lease"]

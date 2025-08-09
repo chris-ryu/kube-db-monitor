@@ -1,0 +1,6 @@
+io/kubedb/monitor/controller/KubeDBControllerApplication.class
+io/kubedb/monitor/controller/config/ControllerConfig.class
+io/kubedb/monitor/controller/config/ControllerConfig$WebhookConfig.class
+io/kubedb/monitor/controller/webhook/AdmissionWebhookService.class
+io/kubedb/monitor/controller/webhook/MutatingAdmissionController.class
+io/kubedb/monitor/controller/webhook/AdmissionWebhookController.class
