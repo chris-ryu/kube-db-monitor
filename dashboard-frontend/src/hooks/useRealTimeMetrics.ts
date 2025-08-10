@@ -62,18 +62,21 @@ export function useRealTimeMetrics(
         
         try {
           const message: WebSocketMessage = JSON.parse(event.data)
+          console.log('📥 WebSocket message received:', message)
           
           // Filter by event types if specified
           if (config.eventTypes.length > 0 && !config.eventTypes.includes(message.data.event_type)) {
+            console.log('🚫 Message filtered out by event type:', message.data.event_type)
             return
           }
           
           setMetrics(prev => {
             const newMetrics = [message.data, ...prev]
+            console.log('📊 Updated metrics count:', newMetrics.length)
             return newMetrics.slice(0, config.maxMetrics)
           })
         } catch (error) {
-          console.warn('Failed to parse WebSocket message:', error)
+          console.warn('Failed to parse WebSocket message:', error, event.data)
         }
       })
 
@@ -124,6 +127,21 @@ export function useRealTimeMetrics(
     mountedRef.current = true
     connect()
 
+    // Mock data event listener for testing
+    const handleMockMessage = (event: any) => {
+      if (!mountedRef.current) return
+      
+      console.log('🎭 Mock WebSocket message received:', event.detail)
+      
+      setMetrics(prev => {
+        const newMetrics = [event.detail.data, ...prev]
+        console.log('📊 Mock updated metrics count:', newMetrics.length)
+        return newMetrics.slice(0, config.maxMetrics)
+      })
+    }
+    
+    window.addEventListener('mockWebSocketMessage', handleMockMessage)
+
     return () => {
       mountedRef.current = false
       
@@ -134,8 +152,10 @@ export function useRealTimeMetrics(
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
+      
+      window.removeEventListener('mockWebSocketMessage', handleMockMessage)
     }
-  }, [connect])
+  }, [connect, config.maxMetrics])
 
   return {
     metrics,

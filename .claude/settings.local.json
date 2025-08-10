@@ -51,7 +51,16 @@
       "WebFetch(domain:kube-db-mon-dashboard.bitgaram.info)",
       "Bash(open /tmp/websocket-test-production.html)",
       "Bash(UNIVERSITY_APP_URL=http://localhost:8082 /tmp/university-registration-demo.sh)",
-      "Bash(./university-real-demo.sh)"
+      "Bash(./university-real-demo.sh)",
+      "Bash(lsof:*)",
+      "Bash(go run:*)",
+      "Bash(npm run dev:*)",
+      "Bash(timeout:*)",
+      "Bash(open http://localhost:3002)",
+      "Bash(./demo-test.sh:*)",
+      "Bash(./demo-continuous.sh:*)",
+      "Bash(open http://localhost:3002/debug)",
+      "Bash(./demo-comprehensive.sh)"
     ],
     "deny": []
   }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { QueryFlowAnimation } from '@/components/QueryFlowAnimation'
 
 interface QueryMetrics {
   timestamp: string
@@ -229,13 +230,10 @@ export default function Dashboard() {
 
         {/* Query Flow Animation */}
         <div className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4 text-center">
-            📊 Real-time Query Flow
-          </h2>
           <div className="bg-gray-800 rounded-lg p-6 border border-green-800">
-            <QueryFlowVisualization 
-              isConnected={isConnected} 
-              recentQueries={recentQueries}
+            <QueryFlowAnimation 
+              className="w-full"
+              maxDisplayedQueries={5}
             />
           </div>
         </div>
