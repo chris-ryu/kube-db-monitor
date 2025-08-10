@@ -16,6 +16,7 @@ public class MetricsCollectorFactory {
         IN_MEMORY,
         LOGGING,
         JMX,
+        HTTP,
         COMPOSITE
     }
     
@@ -35,6 +36,18 @@ public class MetricsCollectorFactory {
             case JMX:
                 logger.info("Creating JmxMetricsCollector");
                 return new JmxMetricsCollector();
+                
+            case HTTP:
+                logger.info("Creating HttpMetricsCollector");
+                String endpoint = System.getProperty("kubedb.monitor.http.endpoint");
+                if (endpoint == null) {
+                    endpoint = System.getenv("KUBEDB_MONITOR_HTTP_ENDPOINT");
+                }
+                if (endpoint == null || endpoint.trim().isEmpty()) {
+                    logger.error("HTTP endpoint not specified for HTTP collector. Set kubedb.monitor.http.endpoint system property or KUBEDB_MONITOR_HTTP_ENDPOINT environment variable");
+                    throw new IllegalArgumentException("HTTP endpoint is required for HTTP collector");
+                }
+                return new HttpMetricsCollector(endpoint);
                 
             case COMPOSITE:
                 logger.info("Creating CompositeMetricsCollector with logging and JMX");

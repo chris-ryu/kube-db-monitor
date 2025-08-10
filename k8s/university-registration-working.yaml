@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: university-registration
-  namespace: kubedb-monitor-test
+  namespace: default
   labels:
     app: university-registration
 spec:
@@ -20,11 +20,12 @@ spec:
         kubedb.monitor/db-types: "h2"
         kubedb.monitor/sampling-rate: "1.0"
         kubedb.monitor/slow-query-threshold: "100"
-        kubedb.monitor/collector-type: "logging"
+        kubedb.monitor/collector-type: "http"
+        kubedb.monitor/collector-endpoint: "http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
     spec:
       initContainers:
       - name: kubedb-agent-init
-        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        image: registry.bitgaram.info/kubedb-monitor/kubedb-monitor-agent:latest
         command: ["sh", "-c"]
         args: ["cp /opt/kubedb-monitor-agent.jar /opt/kubedb-agent/"]
         volumeMounts:
@@ -50,25 +51,16 @@ spec:
           value: "kubernetes"
         # Java 옵션과 KubeDB Agent 설정
         - name: JAVA_OPTS
-          value: "-Xmx512m -Xms256m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=100,collector-type=logging"
-        # H2 데이터베이스 설정
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
+        # H2 데이터베이스 설정 (단순화)
         - name: SPRING_DATASOURCE_URL
-          value: "jdbc:h2:mem:coursedb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MYSQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE"
+          value: "jdbc:h2:mem:testdb"
         - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
           value: "org.h2.Driver"
         - name: SPRING_DATASOURCE_USERNAME
           value: "sa"
         - name: SPRING_DATASOURCE_PASSWORD
           value: ""
-        # Hikari Connection Pool 설정
-        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
-          value: "10"
-        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
-          value: "2"
-        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
-          value: "30000"
-        - name: SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT
-          value: "300000"
         # JPA/Hibernate 설정
         - name: SPRING_JPA_HIBERNATE_DDL_AUTO
           value: "create-drop"
@@ -85,9 +77,9 @@ spec:
           value: "true"
         - name: SPRING_H2_CONSOLE_PATH
           value: "/h2-console"
-        # 데이터 초기화 설정 (비활성화)
+        # 데이터 초기화 설정 (활성화)
         - name: APP_REGISTRATION_INITIALIZE_SAMPLE_DATA
-          value: "false"
+          value: "true"
         # 로깅 설정
         - name: LOGGING_LEVEL_ROOT
           value: "INFO"
@@ -136,7 +128,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: university-registration-service
-  namespace: kubedb-monitor-test
+  namespace: default
   labels:
     app: university-registration
   annotations:

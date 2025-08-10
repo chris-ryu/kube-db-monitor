@@ -27,6 +27,8 @@ public class AgentConfig {
     private final List<String> supportedDatabases;
     private final boolean maskSqlParams;
     private final long slowQueryThresholdMs;
+    private final String collectorType;
+    private final String collectorEndpoint;
     
     private AgentConfig(Builder builder) {
         this.enabled = builder.enabled;
@@ -34,6 +36,8 @@ public class AgentConfig {
         this.supportedDatabases = builder.supportedDatabases;
         this.maskSqlParams = builder.maskSqlParams;
         this.slowQueryThresholdMs = builder.slowQueryThresholdMs;
+        this.collectorType = builder.collectorType;
+        this.collectorEndpoint = builder.collectorEndpoint;
     }
     
     /**
@@ -92,7 +96,29 @@ public class AgentConfig {
             }
         }
         
-        return builder.build();
+        // Parse collector type
+        if (args.containsKey("collector-type")) {
+            builder.collectorType(args.get("collector-type"));
+        }
+        
+        // Parse collector endpoint
+        if (args.containsKey("collector-endpoint")) {
+            builder.collectorEndpoint(args.get("collector-endpoint"));
+        }
+        
+        AgentConfig config = builder.build();
+        
+        // Set system properties for metrics collector
+        if (config.getCollectorType() != null) {
+            System.setProperty("kubedb.monitor.collector.type", config.getCollectorType().toUpperCase());
+        }
+        if (config.getCollectorEndpoint() != null) {
+            System.setProperty("kubedb.monitor.http.endpoint", config.getCollectorEndpoint());
+        }
+        
+        logger.info("Agent configuration: {}", config);
+        
+        return config;
     }
     
     private static Map<String, String> parseArgs(String agentArgs) {
@@ -114,6 +140,8 @@ public class AgentConfig {
     public List<String> getSupportedDatabases() { return supportedDatabases; }
     public boolean isMaskSqlParams() { return maskSqlParams; }
     public long getSlowQueryThresholdMs() { return slowQueryThresholdMs; }
+    public String getCollectorType() { return collectorType; }
+    public String getCollectorEndpoint() { return collectorEndpoint; }
     
     public static class Builder {
         private boolean enabled = DEFAULT_ENABLED;
@@ -121,6 +149,8 @@ public class AgentConfig {
         private List<String> supportedDatabases = DEFAULT_SUPPORTED_DATABASES;
         private boolean maskSqlParams = DEFAULT_MASK_SQL_PARAMS;
         private long slowQueryThresholdMs = DEFAULT_SLOW_QUERY_THRESHOLD_MS;
+        private String collectorType = "COMPOSITE"; // Default collector type
+        private String collectorEndpoint;
         
         public Builder enabled(boolean enabled) {
             this.enabled = enabled;
@@ -147,6 +177,16 @@ public class AgentConfig {
             return this;
         }
         
+        public Builder collectorType(String collectorType) {
+            this.collectorType = collectorType;
+            return this;
+        }
+        
+        public Builder collectorEndpoint(String collectorEndpoint) {
+            this.collectorEndpoint = collectorEndpoint;
+            return this;
+        }
+        
         public AgentConfig build() {
             return new AgentConfig(this);
         }
@@ -160,6 +200,8 @@ public class AgentConfig {
                 ", supportedDatabases=" + supportedDatabases +
                 ", maskSqlParams=" + maskSqlParams +
                 ", slowQueryThresholdMs=" + slowQueryThresholdMs +
+                ", collectorType='" + collectorType + '\'' +
+                ", collectorEndpoint='" + collectorEndpoint + '\'' +
                 '}';
     }
 }

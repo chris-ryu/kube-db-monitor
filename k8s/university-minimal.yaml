@@ -2,22 +2,27 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: university-registration-minimal
-  namespace: kubedb-monitor-test
+  namespace: default
   labels:
-    app: university-registration
+    app: university-registration-minimal
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: university-registration
+      app: university-registration-minimal
   template:
     metadata:
       labels:
-        app: university-registration
-      annotations:
-        kubedb.monitor/enable: "true"
-        kubedb.monitor/db-types: "h2"
+        app: university-registration-minimal
     spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/kubedb-monitor-agent:latest
+        command: ["sh", "-c"]
+        args: ["cp /opt/kubedb-monitor-agent.jar /opt/kubedb-agent/"]
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
       containers:
       - name: university-registration
         image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
@@ -26,12 +31,9 @@ spec:
         - containerPort: 8080
           name: http
         env:
-        - name: SPRING_PROFILES_ACTIVE
-          value: "test"
+        # 최소 필수 설정
         - name: JAVA_OPTS
-          value: "-Xmx256m -Xms128m"
-        - name: SPRING_DATASOURCE_JDBCURL
-          value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+          value: "-javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
         - name: SPRING_DATASOURCE_URL
           value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
         - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
@@ -42,30 +44,38 @@ spec:
           value: ""
         - name: SPRING_JPA_HIBERNATE_DDL_AUTO
           value: "create-drop"
-        - name: APP_REGISTRATION_INITIALIZE_SAMPLE_DATA
-          value: "true"
+        - name: SPRING_SQL_INIT_MODE
+          value: "never"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "50m"
-          limits:
             memory: "256Mi"
             cpu: "100m"
-        readinessProbe:
-          httpGet:
-            path: /actuator/health
-            port: 8080
-          initialDelaySeconds: 60
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 6
-        livenessProbe:
-          httpGet:
-            path: /actuator/health
-            port: 8080
-          initialDelaySeconds: 120
-          periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 3
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
       imagePullSecrets:
       - name: registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-minimal-service
+  namespace: default
+  labels:
+    app: university-registration-minimal
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-minimal
+EOF < /dev/null

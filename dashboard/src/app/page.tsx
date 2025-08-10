@@ -47,24 +47,14 @@ export default function Dashboard() {
   useEffect(() => {
     console.log('🚀 Starting KubeDB Monitor Dashboard')
     
-    // Always try WebSocket connection first
-    const useWebSocket = true
-    const wsUrl = window.location.hostname === 'localhost' 
-      ? 'ws://localhost:8080/ws'
-      : `wss://${window.location.hostname}/ws`
+    // Try WebSocket connection first
+    const wsUrl = window.location.protocol === 'https:' 
+      ? `wss://${window.location.host}/ws`
+      : `ws://${window.location.host.replace(':3000', ':8080')}/ws`
     
-    console.log(`📍 Environment: ${process.env.NODE_ENV}, Host: ${window.location.hostname}`)
-    console.log(`🔗 WebSocket URL: ${wsUrl}, Use WebSocket: ${useWebSocket}`)
+    console.log(`🔗 WebSocket URL: ${wsUrl}`)
     
-    if (useWebSocket) {
-      // Use WebSocket connection for production
-      connectWebSocket(wsUrl)
-      
-      // Wait for WebSocket connection - no fallback to mock data
-    } else {
-      // WebSocket disabled - waiting for real data
-      console.log('⏳ WebSocket disabled - waiting for real data connection')
-    }
+    connectWebSocket(wsUrl)
   }, [])
 
   const connectWebSocket = (wsUrl: string) => {
@@ -111,8 +101,6 @@ export default function Dashboard() {
         ws.onerror = (error) => {
           console.error('❌ WebSocket error:', error)
           setIsConnected(false)
-          
-          // No fallback to mock data - wait for real connection
         }
       } catch (error) {
         console.error('Failed to create WebSocket:', error)
@@ -170,8 +158,6 @@ export default function Dashboard() {
       errorRate: Math.round(errorRate * 100) / 100
     })
   }
-
-  // Mock data generation removed - using only real JDBC data from WebSocket
 
   const recentQueries = metrics
     .filter(m => m.event_type === 'query_execution' && m.data)

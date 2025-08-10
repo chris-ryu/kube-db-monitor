@@ -15,10 +15,20 @@ spec:
       labels:
         app: university-registration-final
     spec:
+      initContainers:
+      - name: copy-agent
+        image: registry.bitgaram.info/kubedb-monitor/kubedb-monitor-agent:latest
+        command: ['sh', '-c', 'cp /opt/kubedb-monitor-agent.jar /shared/']
+        volumeMounts:
+        - name: shared-agent
+          mountPath: /shared
       containers:
       - name: university-registration
         image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
         imagePullPolicy: Always
+        volumeMounts:
+        - name: shared-agent
+          mountPath: /opt
         ports:
         - containerPort: 8080
           name: http
@@ -26,9 +36,9 @@ spec:
         # Spring Boot 기본 설정
         - name: SPRING_PROFILES_ACTIVE
           value: "development"
-        # Java 옵션
+        # Java 옵션 + KubeDB Agent
         - name: JAVA_OPTS
-          value: "-Xmx256m -Xms128m"
+          value: "-Xmx256m -Xms128m -javaagent:/opt/kubedb-monitor-agent.jar=collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane:8080/api/metrics"
         # HikariCP가 인식할 수 있는 올바른 환경변수
         - name: SPRING_DATASOURCE_JDBC_URL
           value: "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
@@ -98,5 +108,8 @@ spec:
           periodSeconds: 15
           timeoutSeconds: 10
           failureThreshold: 8
+      volumes:
+      - name: shared-agent
+        emptyDir: {}
       imagePullSecrets:
       - name: registry-secret

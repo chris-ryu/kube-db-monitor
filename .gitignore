@@ -35,6 +35,48 @@ buildNumber.properties
 # https://github.com/takari/maven-wrapper#usage-without-binary-jar
 .mvn/wrapper/maven-wrapper.jar
 
+# Spring Boot
+spring-boot-*.log
+application-*.log
+application.pid
+
+# Java compilation and runtime
+*.hprof
+*.heap
+*.dump
+*.jfr
+**/hs_err_pid*
+**/replay_pid*
+
+# Surefire reports
+**/surefire-reports/
+**/failsafe-reports/
+
+# JaCoCo coverage reports
+**/jacoco.exec
+**/jacoco-ut.exec
+**/jacoco-it.exec
+
+# TestNG
+test-output/
+
+# JUnit
+junit.xml
+
+# Spring Boot DevTools
+.spring-boot-devtools.properties
+
+# STS (Spring Tool Suite)
+.apt_generated
+.apt_generated_test
+.factorypath
+.springBeans
+.sts4-cache
+
+# Java profiling
+*.jfr
+*.hprof
+
 # Gradle
 .gradle
 build/
@@ -78,11 +120,19 @@ local.properties
 
 # Node.js
 node_modules/
+dashboard-frontend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
+
+# Next.js
+.next/
+dashboard-frontend/.next/
+next-env.d.ts
+dashboard-frontend/next-env.d.ts
+out/
 
 # Runtime data
 pids
@@ -225,3 +275,13 @@ out/
 # Runtime
 *.pid
 *.lock
+
+# Test files and temporary files
+test-*.js
+test-*.html
+test-*.ts
+**/test-ws.*
+**/test-websocket.*
+
+# Claude assistant temporary files
+.claude/settings.local.json

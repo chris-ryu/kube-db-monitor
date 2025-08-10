@@ -40,7 +40,18 @@
       "Bash(go build:*)",
       "Bash(npm install)",
       "Bash(rm:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(docker logs:*)",
+      "Bash(open http://localhost:3000)",
+      "Bash(docker exec:*)",
+      "Bash(open /tmp/websocket-test.html)",
+      "Bash(open /tmp/local-websocket-test.html)",
+      "Bash(open /tmp/websocket-test-8081.html)",
+      "Bash(open http://localhost:3001)",
+      "WebFetch(domain:kube-db-mon-dashboard.bitgaram.info)",
+      "Bash(open /tmp/websocket-test-production.html)",
+      "Bash(UNIVERSITY_APP_URL=http://localhost:8082 /tmp/university-registration-demo.sh)",
+      "Bash(./university-real-demo.sh)"
     ],
     "deny": []
   }

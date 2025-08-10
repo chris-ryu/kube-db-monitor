@@ -102,16 +102,17 @@ func (h *Hub) run() {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
-			log.Printf("Client connected. Total clients: %d", len(h.clients))
+			log.Printf("✅ Client connected. Total clients: %d", len(h.clients))
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
-				log.Printf("Client disconnected. Total clients: %d", len(h.clients))
+				log.Printf("🔌 Client disconnected. Total clients: %d", len(h.clients))
 			}
 
 		case message := <-h.broadcast:
+			log.Printf("📡 Broadcasting message to %d clients", len(h.clients))
 			for client := range h.clients {
 				select {
 				case client.send <- message:
@@ -124,12 +125,40 @@ func (h *Hub) run() {
 	}
 }
 
-func (h *Hub) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("WebSocket upgrade error: %v", err)
+func (h *Hub) receiveMetrics(w http.ResponseWriter, r *http.Request) {
+	var metric QueryMetrics
+	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
+		log.Printf("❌ Failed to decode metrics: %v", err)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("📊 Received real JDBC metric: %s - %s", metric.EventType, metric.Data.SQLType)
+	
+	// Broadcast the real metric to all connected WebSocket clients
+	message := WebSocketMessage{
+		Type: "metric",
+		Data: metric,
+	}
+
+	h.broadcast <- message
+	
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "received"})
+}
+
+func (h *Hub) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	log.Printf("🔗 WebSocket connection attempt from %s", r.RemoteAddr)
+	log.Printf("🔍 Headers: %+v", r.Header)
+	
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("❌ WebSocket upgrade error: %v", err)
+		return
+	}
+	
+	log.Printf("✅ WebSocket upgrade successful")
 
 	client := &Client{
 		hub:  h,
@@ -197,105 +226,7 @@ func (c *Client) writePump() {
 	}
 }
 
-// Mock metrics generator for demo
-func generateMockMetrics(hub *Hub) {
-	queries := []struct {
-		pattern    string
-		sqlType    string
-		tables     []string
-		minTime    int64
-		maxTime    int64
-	}{
-		{"SELECT * FROM students WHERE id = ?", "SELECT", []string{"students"}, 5, 20},
-		{"INSERT INTO departments (name, code) VALUES (?, ?)", "INSERT", []string{"departments"}, 8, 15},
-		{"UPDATE courses SET name = ? WHERE id = ?", "UPDATE", []string{"courses"}, 10, 25},
-		{"SELECT s.*, d.name FROM students s JOIN departments d ON s.dept_id = d.id", "SELECT", []string{"students", "departments"}, 15, 45},
-		{"DELETE FROM enrollments WHERE student_id = ?", "DELETE", []string{"enrollments"}, 5, 12},
-	}
-
-	connectionPool := struct {
-		active int
-		idle   int
-		max    int
-	}{5, 3, 10}
-
-	for {
-		// Generate random query metrics
-		for i, query := range queries {
-			if i%3 == 0 { // Generate metrics for some queries
-				queryID := time.Now().Format("20060102150405") + string(rune(65+i))
-				executionTime := query.minTime + int64(time.Now().UnixNano()%int64(query.maxTime-query.minTime))
-				
-				// Simulate occasional slow queries or errors
-				status := "SUCCESS"
-				if executionTime > 40 {
-					status = "SUCCESS" // Still success but slow
-				}
-				if time.Now().UnixNano()%100 < 2 { // 2% error rate
-					status = "ERROR"
-					executionTime = 0
-				}
-
-				// Simulate connection pool changes
-				if time.Now().UnixNano()%10 < 3 {
-					connectionPool.active = 3 + int(time.Now().UnixNano()%5)
-					connectionPool.idle = connectionPool.max - connectionPool.active
-				}
-
-				heapUsed := int64(128 + time.Now().UnixNano()%256)
-				heapMax := int64(512)
-				heapRatio := float64(heapUsed) / float64(heapMax)
-				cpuRatio := 0.1 + float64(time.Now().UnixNano()%30)/100
-
-				poolActive := connectionPool.active
-				poolIdle := connectionPool.idle
-				poolMax := connectionPool.max
-				poolRatio := float64(poolActive) / float64(poolMax)
-
-				metrics := QueryMetrics{
-					Timestamp: time.Now().Format(time.RFC3339),
-					PodName:   "university-registration-demo-abc123",
-					Namespace: "kubedb-monitor-test",
-					EventType: "query_execution",
-					Data: &QueryData{
-						QueryID:         queryID,
-						SQLPattern:      query.pattern,
-						SQLType:         query.sqlType,
-						TableNames:      query.tables,
-						ExecutionTimeMs: &executionTime,
-						Status:          status,
-					},
-					Metrics: &SystemMetrics{
-						ConnectionPoolActive:     &poolActive,
-						ConnectionPoolIdle:       &poolIdle,
-						ConnectionPoolMax:        &poolMax,
-						ConnectionPoolUsageRatio: &poolRatio,
-						HeapUsedMb:              &heapUsed,
-						HeapMaxMb:               &heapMax,
-						HeapUsageRatio:          &heapRatio,
-						CPUUsageRatio:           &cpuRatio,
-					},
-				}
-
-				message := WebSocketMessage{
-					Type:      "query_execution",
-					Data:      metrics,
-					Timestamp: time.Now().Format(time.RFC3339),
-				}
-
-				select {
-				case hub.broadcast <- message:
-				default:
-					log.Printf("Hub broadcast channel is full, dropping message")
-				}
-			}
-		}
-
-		// Random sleep between 500ms to 2s
-		sleepTime := 500 + time.Now().UnixNano()%1500
-		time.Sleep(time.Duration(sleepTime) * time.Millisecond)
-	}
-}
+// Mock metrics generator removed - using real JDBC data from /api/metrics endpoint
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -308,17 +239,19 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	log.Printf("🎉 KubeDB Monitor Control Plane starting...")
+	
 	hub := newHub()
 	go hub.run()
 
-	// Start mock metrics generation
-	go generateMockMetrics(hub)
+	// Mock metrics generation disabled - using real JDBC data from /api/metrics endpoint
 
 	router := mux.NewRouter()
 	
 	// API routes
 	router.HandleFunc("/ws", hub.handleWebSocket)
 	router.HandleFunc("/api/health", healthHandler).Methods("GET")
+	router.HandleFunc("/api/metrics", hub.receiveMetrics).Methods("POST")
 	
 	// Serve static files for dashboard (if needed)
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/")))
