@@ -1,5 +1,0 @@
-/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-controller/src/main/java/io/kubedb/monitor/controller/webhook/MutatingAdmissionController.java
-/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-controller/src/main/java/io/kubedb/monitor/controller/webhook/AdmissionWebhookController.java
-/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-controller/src/main/java/io/kubedb/monitor/controller/KubeDBControllerApplication.java
-/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-controller/src/main/java/io/kubedb/monitor/controller/webhook/AdmissionWebhookService.java
-/Users/narzis/workspace/kube-db-monitor/kubedb-monitor-controller/src/main/java/io/kubedb/monitor/controller/config/ControllerConfig.java
