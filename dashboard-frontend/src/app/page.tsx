@@ -1,70 +1,56 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { QueryFlowAnimation } from '@/components/QueryFlowAnimation'
-
-interface QueryMetrics {
-  timestamp: string
-  pod_name?: string
-  event_type: string
-  data?: {
-    query_id: string
-    sql_pattern?: string
-    sql_type?: string
-    table_names?: string[]
-    execution_time_ms?: number
-    status: string
-    error_message?: string
-  }
-  metrics?: {
-    connection_pool_active?: number
-    connection_pool_idle?: number
-    connection_pool_max?: number
-    connection_pool_usage_ratio?: number
-    heap_used_mb?: number
-    heap_max_mb?: number
-    heap_usage_ratio?: number
-    cpu_usage_ratio?: number
-  }
-}
+import { QueryMetrics } from '@/types/metrics'
+import { TransactionEvent } from '@/types/transaction'
+import { DeadlockEvent } from '@/types/deadlock'
+import { DeadlockAlert } from '@/components/DeadlockAlert'
+import { TransactionTimeline } from '@/components/TransactionTimeline'
+import { LongRunningTransactionAlert } from '@/components/LongRunningTransactionAlert'
+import { NodePodMetrics } from '@/components/NodePodMetrics'
 
 interface AggregatedMetrics {
   qps: number
   avgLatency: number
   activeConnections: number
   errorRate: number
+  transactionCount: number
+  tps: number // Transactions Per Second
 }
 
 export default function Dashboard() {
   const [metrics, setMetrics] = useState<QueryMetrics[]>([])
+  const [transactions, setTransactions] = useState<TransactionEvent[]>([])
+  const [deadlocks, setDeadlocks] = useState<DeadlockEvent[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [aggregatedMetrics, setAggregatedMetrics] = useState<AggregatedMetrics>({
     qps: 0,
     avgLatency: 0,
     activeConnections: 0,
-    errorRate: 0
+    errorRate: 0,
+    transactionCount: 0,
+    tps: 0
   })
 
   useEffect(() => {
-    console.log('🚀 Starting KubeDB Monitor Dashboard')
+    console.log('🚀 Starting Advanced KubeDB Monitor Dashboard')
     
     // Always try WebSocket connection first
     const useWebSocket = true
-    const wsUrl = window.location.hostname === 'localhost' 
-      ? 'ws://localhost:8080/ws'
-      : `wss://${window.location.hostname}/ws`
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
+      (window.location.hostname === 'localhost' 
+        ? 'ws://localhost:8080/ws'
+        : `wss://kube-db-mon-dashboard.bitgaram.info/ws`)
     
     console.log(`📍 Environment: ${process.env.NODE_ENV}, Host: ${window.location.hostname}`)
     console.log(`🔗 WebSocket URL: ${wsUrl}, Use WebSocket: ${useWebSocket}`)
     
     if (useWebSocket) {
-      // Use WebSocket connection for production
       connectWebSocket(wsUrl)
-      
-      // Wait for WebSocket connection - no fallback to mock data
     } else {
-      // WebSocket disabled - waiting for real data
       console.log('⏳ WebSocket disabled - waiting for real data connection')
+      // Only generate mock data when WebSocket is disabled
+      generateMockDataForDemo()
     }
   }, [])
 
@@ -89,10 +75,10 @@ export default function Dashboard() {
         ws.onmessage = (event) => {
           try {
             const message = JSON.parse(event.data)
-            const newMetric: QueryMetrics = message.data
-            processMetric(newMetric)
+            console.log('📨 Received WebSocket message:', message.type, message)
+            processWebSocketMessage(message)
           } catch (error) {
-            console.error('Failed to parse WebSocket message:', error)
+            console.error('❌ Failed to parse WebSocket message:', error, event.data)
           }
         }
         
@@ -100,7 +86,6 @@ export default function Dashboard() {
           console.log('🔌 WebSocket disconnected', { code: event.code, reason: event.reason })
           setIsConnected(false)
           
-          // Auto-reconnect after 5 seconds
           if (!reconnectTimer) {
             reconnectTimer = setTimeout(() => {
               console.log('🔄 Attempting to reconnect...')
@@ -112,8 +97,6 @@ export default function Dashboard() {
         ws.onerror = (error) => {
           console.error('❌ WebSocket error:', error)
           setIsConnected(false)
-          
-          // No fallback to mock data - wait for real connection
         }
       } catch (error) {
         console.error('Failed to create WebSocket:', error)
@@ -126,16 +109,76 @@ export default function Dashboard() {
     connect()
   }
 
+  const processWebSocketMessage = (message: any) => {
+    console.log('🔍 Processing WebSocket message type:', message.type)
+    // Handle different types of WebSocket messages
+    if (message.type === 'query_metrics' || message.type === 'metric') {
+      console.log('📊 Processing query metrics:', message.data)
+      processMetric(message.data)
+    } else if (message.type === 'transaction_event') {
+      console.log('🔄 Processing transaction event:', message.data)
+      processTransactionEvent(message.data)
+    } else if (message.type === 'deadlock_event') {
+      console.log('⚠️ Processing deadlock event:', message.data)
+      processDeadlockEvent(message.data)
+    } else {
+      console.warn('❓ Unknown message type:', message.type, message)
+    }
+  }
+
   const processMetric = (newMetric: QueryMetrics) => {
+    console.log('➕ Adding new metric to state:', newMetric.event_type, newMetric.data?.query_id)
+    
+    // Handle Long Running Transaction events
+    if (newMetric.event_type === 'long_running_transaction') {
+      console.log('🐌 Processing Long Running Transaction event:', newMetric)
+      const transactionEvent: TransactionEvent = {
+        id: `tx-long-${Date.now()}`,
+        transaction_id: newMetric.data?.transaction_id || `tx-${Date.now()}`,
+        start_time: new Date(Date.now() - (newMetric.data?.transaction_duration || 7000)).toISOString(),
+        status: 'active',
+        duration_ms: newMetric.data?.transaction_duration || 7000,
+        query_count: 1,
+        total_execution_time_ms: Math.floor((newMetric.data?.transaction_duration || 7000) * 0.7),
+        pod_name: newMetric.pod_name || 'unknown-pod',
+        namespace: 'production',
+        queries: []
+      }
+      processTransactionEvent(transactionEvent)
+    }
+    
     setMetrics(prev => {
-      const updated = [newMetric, ...prev].slice(0, 100)
+      const updated = [newMetric, ...prev].slice(0, 200)
+      console.log('📈 Metrics state updated, total metrics:', updated.length)
       calculateAndSetAggregatedMetrics(updated)
+      
+      return updated
+    })
+  }
+
+  const processTransactionEvent = (transactionEvent: TransactionEvent) => {
+    setTransactions(prev => {
+      const existing = prev.find(t => t.transaction_id === transactionEvent.transaction_id)
+      if (existing) {
+        // Update existing transaction
+        return prev.map(t => 
+          t.transaction_id === transactionEvent.transaction_id ? transactionEvent : t
+        )
+      } else {
+        // Add new transaction
+        return [transactionEvent, ...prev].slice(0, 100)
+      }
+    })
+  }
+
+  const processDeadlockEvent = (deadlockEvent: DeadlockEvent) => {
+    setDeadlocks(prev => {
+      const updated = [deadlockEvent, ...prev].slice(0, 50)
       return updated
     })
   }
 
   const calculateAndSetAggregatedMetrics = (updatedMetrics: QueryMetrics[]) => {
-    // Calculate aggregated metrics
     const now = Date.now()
     const oneMinuteAgo = now - 60000
     const recentMetrics = updatedMetrics.filter(m => 
@@ -164,19 +207,111 @@ export default function Dashboard() {
     const latestMetric = updatedMetrics.find(m => m.metrics)
     const activeConnections = latestMetric?.metrics?.connection_pool_active ?? 0
     
-    setAggregatedMetrics({
+    // Calculate transactions per second based on query metrics
+    // For demo purposes, consider successful queries as completed transactions
+    const successfulQueries = queryMetrics.filter(m => 
+      m.data?.status === 'SUCCESS'
+    )
+    const tps = successfulQueries.length / 60
+    
+    const newMetrics = {
       qps: Math.round(qps * 100) / 100,
       avgLatency: Math.round(avgLatency * 100) / 100,
       activeConnections,
-      errorRate: Math.round(errorRate * 100) / 100
-    })
+      errorRate: Math.round(errorRate * 100) / 100,
+      transactionCount: Math.max(0, Math.floor(queryMetrics.length / 10)), // Simulate active transactions based on recent query activity
+      tps: Math.round(tps * 100) / 100
+    }
+    
+    console.log('🎯 Calculated new aggregated metrics:', newMetrics)
+    setAggregatedMetrics(newMetrics)
   }
 
-  // Mock data generation removed - using only real JDBC data from WebSocket
 
-  const recentQueries = metrics
-    .filter(m => m.event_type === 'query_execution' && m.data)
-    .slice(0, 5)
+  // Mock data generation for demo
+  const generateMockDataForDemo = () => {
+    // Generate mock transactions
+    const mockTransactions: TransactionEvent[] = [
+      {
+        id: 'evt-1',
+        transaction_id: 'tx-slow-user-registration',
+        start_time: new Date(Date.now() - 8 * 60000).toISOString(), // 8 minutes ago
+        status: 'active',
+        duration_ms: 8 * 60000, // 8 minutes - long running
+        query_count: 12,
+        total_execution_time_ms: 6 * 60000,
+        pod_name: 'registration-service-1',
+        namespace: 'production',
+        queries: [
+          {
+            query_id: 'q-1',
+            sql_pattern: 'SELECT * FROM users WHERE email = ? FOR UPDATE',
+            sql_type: 'SELECT',
+            execution_time_ms: 45000,
+            timestamp: new Date(Date.now() - 7.5 * 60000).toISOString(),
+            sequence_number: 1,
+            status: 'success'
+          }
+        ]
+      },
+      {
+        id: 'evt-2',
+        transaction_id: 'tx-batch-enrollment',
+        start_time: new Date(Date.now() - 2 * 60000).toISOString(),
+        end_time: new Date(Date.now() - 30000).toISOString(),
+        status: 'committed',
+        duration_ms: 90000, // 1.5 minutes
+        query_count: 25,
+        total_execution_time_ms: 75000,
+        pod_name: 'enrollment-service-2',
+        namespace: 'production',
+        queries: []
+      }
+    ]
+
+    // Generate mock deadlock
+    const mockDeadlock: DeadlockEvent = {
+      id: 'dl-demo-1',
+      participants: ['tx-user-update-1', 'tx-enrollment-batch-2'],
+      detectionTime: new Date(Date.now() - 30000).toISOString(), // 30 seconds ago
+      recommendedVictim: 'tx-enrollment-batch-2',
+      lockChain: [
+        'tx-user-update-1 → users table (row_id: 123)',
+        'tx-enrollment-batch-2 → enrollments table (user_id: 123)',
+        'tx-enrollment-batch-2 → users table (row_id: 123) [BLOCKED]'
+      ],
+      severity: 'critical',
+      status: 'active',
+      pod_name: 'enrollment-service-2',
+      namespace: 'production',
+      cycleLength: 2
+    }
+
+    setTransactions(mockTransactions)
+    setDeadlocks([mockDeadlock])
+  }
+
+  const handleResolveDeadlock = (deadlockId: string) => {
+    setDeadlocks(prev => prev.map(d => 
+      d.id === deadlockId 
+        ? { ...d, status: 'resolved' as const, resolvedAt: new Date().toISOString() }
+        : d
+    ))
+    console.log(`🔧 Resolving deadlock: ${deadlockId}`)
+  }
+
+  const handleKillTransaction = (transactionId: string) => {
+    setTransactions(prev => prev.map(t => 
+      t.transaction_id === transactionId
+        ? { ...t, status: 'rolled_back' as const, end_time: new Date().toISOString() }
+        : t
+    ))
+    console.log(`💀 Killing transaction: ${transactionId}`)
+  }
+
+  const longRunningTransactions = transactions.filter(t => 
+    t.status === 'active' && t.duration_ms && t.duration_ms > 5 * 1000 // > 5 seconds
+  )
 
   return (
     <div className="min-h-screen bg-gray-900 text-green-400 p-8">
@@ -184,7 +319,7 @@ export default function Dashboard() {
         {/* Header */}
         <header className="mb-8">
           <h1 className="text-4xl font-bold text-center mb-4">
-            🚀 KubeDB Monitor Dashboard
+            🚀 Advanced KubeDB Monitor Dashboard
           </h1>
           <div className="text-center">
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
@@ -195,17 +330,23 @@ export default function Dashboard() {
               <div className={`w-2 h-2 rounded-full mr-2 ${
                 isConnected ? 'bg-green-400' : 'bg-red-400'
               }`}></div>
-              {isConnected ? 'Connected' : 'Disconnected'}
+              {isConnected ? 'Connected' : 'Demo Mode'}
             </span>
           </div>
         </header>
 
-        {/* Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {/* Enhanced Metrics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-8">
           <MetricCard
             title="QPS"
             value={aggregatedMetrics.qps.toString()}
             unit="queries/sec"
+            isAnimated={isConnected}
+          />
+          <MetricCard
+            title="TPS"
+            value={aggregatedMetrics.tps.toString()}
+            unit="tx/sec"
             isAnimated={isConnected}
           />
           <MetricCard
@@ -221,6 +362,12 @@ export default function Dashboard() {
             isAnimated={isConnected}
           />
           <MetricCard
+            title="Active Transactions"
+            value={aggregatedMetrics.transactionCount.toString()}
+            unit="transactions"
+            isAnimated={isConnected}
+          />
+          <MetricCard
             title="Error Rate"
             value={aggregatedMetrics.errorRate.toString()}
             unit="%"
@@ -228,17 +375,30 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Query Flow Animation */}
-        <div className="mb-8">
-          <div className="bg-gray-800 rounded-lg p-6 border border-green-800">
-            <QueryFlowAnimation 
-              className="w-full"
-              maxDisplayedQueries={5}
-            />
-          </div>
+        {/* Alert Panels */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          <DeadlockAlert 
+            deadlocks={deadlocks} 
+            onResolve={handleResolveDeadlock}
+          />
+          <LongRunningTransactionAlert 
+            transactions={longRunningTransactions}
+            onKillTransaction={handleKillTransaction}
+            thresholdSeconds={5}
+          />
         </div>
 
-        {/* Recent Queries */}
+        {/* Node/Pod Metrics Panel */}
+        <div className="mb-8">
+          <NodePodMetrics metrics={metrics} />
+        </div>
+
+        {/* Transaction Timeline */}
+        <div className="mb-8">
+          <TransactionTimeline transactions={transactions} />
+        </div>
+
+        {/* Recent Queries Table */}
         <div>
           <h2 className="text-2xl font-semibold mb-4 text-center">
             📋 Recent Queries
@@ -249,6 +409,7 @@ export default function Dashboard() {
                 <thead>
                   <tr className="border-b border-green-800">
                     <th className="text-left p-2">Time</th>
+                    <th className="text-left p-2">Pod</th>
                     <th className="text-left p-2">Type</th>
                     <th className="text-left p-2">Pattern</th>
                     <th className="text-left p-2">Latency</th>
@@ -256,7 +417,10 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentQueries.map((query, index) => (
+                  {metrics
+                    .filter(m => (m.event_type === 'query_execution' || m.event_type === 'tps_event' || m.event_type === 'long_running_transaction') && m.data)
+                    .slice(0, 10)
+                    .map((query, index) => (
                     <tr 
                       key={`${query.data?.query_id}-${index}`}
                       className="border-b border-gray-700 hover:bg-gray-750"
@@ -264,7 +428,16 @@ export default function Dashboard() {
                       <td className="p-2">
                         {new Date(query.timestamp).toLocaleTimeString()}
                       </td>
-                      <td className="p-2">{query.data?.sql_type || 'N/A'}</td>
+                      <td className="p-2">
+                        <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">
+                          {query.pod_name || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="p-2">
+                        {query.event_type === 'tps_event' ? 'TPS_EVENT' : 
+                         query.event_type === 'long_running_transaction' ? 'LONG_TX' : 
+                         query.data?.sql_type || 'OTHER'}
+                      </td>
                       <td className="p-2 font-mono text-xs">
                         {query.data?.sql_pattern?.substring(0, 50) || 'N/A'}...
                       </td>
@@ -282,9 +455,9 @@ export default function Dashboard() {
                       </td>
                     </tr>
                   ))}
-                  {recentQueries.length === 0 && (
+                  {metrics.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="text-center p-8 text-gray-500">
+                      <td colSpan={6} className="text-center p-8 text-gray-500">
                         No queries yet... Waiting for data 📊
                       </td>
                     </tr>
@@ -316,62 +489,9 @@ function MetricCard({
     }`}>
       <h3 className="text-sm font-medium text-gray-400 mb-2">{title}</h3>
       <div className="flex items-end space-x-2">
-        <span className="text-3xl font-bold text-green-400">{value}</span>
-        <span className="text-sm text-gray-500">{unit}</span>
+        <span className="text-2xl font-bold text-green-400">{value}</span>
+        <span className="text-xs text-gray-500">{unit}</span>
       </div>
-    </div>
-  )
-}
-
-function QueryFlowVisualization({ 
-  isConnected, 
-  recentQueries 
-}: { 
-  isConnected: boolean
-  recentQueries: QueryMetrics[]
-}) {
-  return (
-    <div className="flex items-center justify-center space-x-8 h-32">
-      <div className="flex flex-col items-center">
-        <div className={`w-16 h-16 rounded-full border-2 flex items-center justify-center ${
-          isConnected ? 'border-green-400 bg-green-900' : 'border-gray-600 bg-gray-700'
-        }`}>
-          <span className="text-2xl">📱</span>
-        </div>
-        <span className="text-xs mt-2">App</span>
-      </div>
-      
-      <div className={`flex-1 h-1 ${
-        isConnected ? 'bg-green-400' : 'bg-gray-600'
-      } ${isConnected ? 'animate-pulse' : ''}`}></div>
-      
-      <div className="flex flex-col items-center">
-        <div className={`w-16 h-16 rounded-full border-2 flex items-center justify-center ${
-          isConnected ? 'border-green-400 bg-green-900' : 'border-gray-600 bg-gray-700'
-        }`}>
-          <span className="text-2xl">🏊</span>
-        </div>
-        <span className="text-xs mt-2">Pool</span>
-      </div>
-      
-      <div className={`flex-1 h-1 ${
-        isConnected ? 'bg-green-400' : 'bg-gray-600'
-      } ${isConnected ? 'animate-pulse' : ''}`}></div>
-      
-      <div className="flex flex-col items-center">
-        <div className={`w-16 h-16 rounded-full border-2 flex items-center justify-center ${
-          isConnected ? 'border-green-400 bg-green-900' : 'border-gray-600 bg-gray-700'
-        }`}>
-          <span className="text-2xl">🗄️</span>
-        </div>
-        <span className="text-xs mt-2">Database</span>
-      </div>
-      
-      {isConnected && recentQueries.length > 0 && (
-        <div className="absolute">
-          <div className="w-4 h-4 rounded-full bg-green-400 animate-bounce"></div>
-        </div>
-      )}
     </div>
   )
 }

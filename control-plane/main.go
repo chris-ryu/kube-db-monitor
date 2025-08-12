@@ -133,12 +133,30 @@ func (h *Hub) receiveMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("📊 Received real JDBC metric: %s - %s", metric.EventType, metric.Data.SQLType)
+	// Safe logging to avoid panic
+	sqlType := "unknown"
+	if metric.Data != nil {
+		sqlType = metric.Data.SQLType
+	}
+	log.Printf("📊 Received real JDBC metric: %s - %s", metric.EventType, sqlType)
 	
-	// Broadcast the real metric to all connected WebSocket clients
+	// Broadcast the real metric to all connected WebSocket clients with proper type
+	var messageType string
+	switch metric.EventType {
+	case "query_execution":
+		messageType = "query_metrics"
+	case "transaction_event":
+		messageType = "transaction_event"
+	case "deadlock_event":
+		messageType = "deadlock_event"
+	default:
+		messageType = "query_metrics" // default fallback
+	}
+	
 	message := WebSocketMessage{
-		Type: "metric",
+		Type: messageType,
 		Data: metric,
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
 	h.broadcast <- message

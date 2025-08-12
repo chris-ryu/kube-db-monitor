@@ -39,7 +39,7 @@ spec:
         - name: SPRING_PROFILES_ACTIVE
           value: "development"
         - name: JAVA_OPTS
-          value: "-Xmx512m -Xms256m -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=100,collector-type=logging"
+          value: "-Xmx512m -Xms256m -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=h2,sampling-rate=1.0,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
         - name: SPRING_DATASOURCE_URL
           value: "jdbc:h2:mem:coursedb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MYSQL"
         - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME

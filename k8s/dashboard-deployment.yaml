@@ -19,7 +19,7 @@ spec:
       - name: registry-secret
       containers:
       - name: dashboard
-        image: registry.bitgaram.info/kube-db-monitor-dashboard:latest
+        image: registry.bitgaram.info/kubedb-monitor/dashboard:timeline-fixed
         imagePullPolicy: Always
         ports:
         - containerPort: 3000

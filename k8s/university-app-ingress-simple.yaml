@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: university-registration-simple
+  namespace: kubedb-monitor-test
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /api/
+spec:
+  tls:
+  - hosts:
+    - university-app.bitgaram.info
+    secretName: university-app-tls
+  rules:
+  - host: university-app.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: university-registration-demo-service
+            port:
+              number: 80

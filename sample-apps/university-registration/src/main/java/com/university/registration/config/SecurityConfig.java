@@ -30,20 +30,8 @@ public class SecurityConfig {
                 .xssProtection().and()
                 .referrerPolicy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
             .authorizeHttpRequests(authz -> authz
-                // Public endpoints
-                .requestMatchers("/h2-console/**").permitAll()
-                .requestMatchers("/actuator/**").permitAll()
-                .requestMatchers("/auth/**").permitAll()
-                .requestMatchers("/courses/**").permitAll()  // For testing purposes
-                
-                // Protected endpoints
-                .requestMatchers("/students/**").authenticated()
-                .requestMatchers("/cart/**").authenticated()
-                .requestMatchers("/enrollments/**").authenticated()
-                .requestMatchers("/admin/**").hasRole("ADMIN")
-                
-                // All other requests require authentication
-                .anyRequest().authenticated()
+                // For demo purposes - allow all requests
+                .anyRequest().permitAll()
             );
 
         // Allow H2 console to be displayed in frames (for development)

@@ -36,6 +36,10 @@ export interface QueryData {
   complexity_score?: number
   index_usage?: IndexUsageInfo
   cache_hit_ratio?: number
+  // TPS and Long Running Transaction specific fields
+  tps_value?: number
+  transaction_duration?: number
+  transaction_id?: string
 }
 
 export interface ExecutionContext {
@@ -112,6 +116,8 @@ export type EventType =
   | 'system_metrics'
   | 'user_session'
   | 'dashboard_access'
+  | 'tps_event'
+  | 'long_running_transaction'
 
 // WebSocket 메시지 타입
 export interface WebSocketMessage {

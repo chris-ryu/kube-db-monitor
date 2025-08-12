@@ -3,7 +3,6 @@ package io.kubedb.monitor.common.metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -40,6 +39,7 @@ public class HttpMetricsCollector implements MetricsCollector {
         }
         
         totalCount.incrementAndGet();
+        logger.info("📊 HttpMetricsCollector.collect called, totalCount now: " + totalCount.get());
         if (metric.isError()) {
             errorCount.incrementAndGet();
         }
@@ -89,7 +89,18 @@ public class HttpMetricsCollector implements MetricsCollector {
         HttpMetricPayload payload = new HttpMetricPayload();
         payload.timestamp = Instant.now().toString();
         payload.podName = System.getenv("HOSTNAME"); // Kubernetes pod name
-        payload.eventType = "query_execution";
+        
+        // Detect special event types based on SQL pattern and connection URL
+        String sql = metric.getSql();
+        String connectionUrl = metric.getConnectionUrl();
+        
+        if ("TPS_EVENT".equals(sql)) {
+            payload.eventType = "tps_event";
+        } else if ("LONG_RUNNING_TRANSACTION".equals(sql)) {
+            payload.eventType = "long_running_transaction";
+        } else {
+            payload.eventType = "query_execution";
+        }
         
         // Data section
         payload.data = new HttpMetricPayload.QueryData();
@@ -100,6 +111,18 @@ public class HttpMetricsCollector implements MetricsCollector {
         payload.data.executionTimeMs = metric.getExecutionTimeMs();
         payload.data.status = metric.isError() ? "ERROR" : "SUCCESS";
         payload.data.errorMessage = metric.getErrorMessage();
+        
+        // Add special handling for TPS and Long Running Transaction events
+        if ("tps_event".equals(payload.eventType)) {
+            payload.data.tpsValue = (double) metric.getExecutionTimeMs(); // TPS value stored in executionTimeMs
+            payload.data.sqlPattern = "High TPS detected: " + payload.data.tpsValue + " queries/second";
+            logger.info("🚀 TPS EVENT: Sending TPS event with value {} to Control Plane", payload.data.tpsValue);
+        } else if ("long_running_transaction".equals(payload.eventType)) {
+            payload.data.transactionDuration = metric.getExecutionTimeMs();
+            payload.data.transactionId = extractTransactionIdFromUrl(connectionUrl);
+            payload.data.sqlPattern = "Long running transaction detected: " + payload.data.transactionDuration + "ms";
+            logger.warn("🚨 LONG RUNNING TRANSACTION EVENT: Sending long running transaction event ({}ms) to Control Plane", payload.data.transactionDuration);
+        }
         
         // Metrics section
         payload.metrics = new HttpMetricPayload.SystemMetrics();
@@ -157,6 +180,18 @@ public class HttpMetricsCollector implements MetricsCollector {
         if (payload.data.errorMessage != null) {
             json.append(",\"error_message\":\"").append(escapeJson(payload.data.errorMessage)).append("\"");
         }
+        
+        // Add advanced event fields
+        if (payload.data.tpsValue != null) {
+            json.append(",\"tps_value\":").append(payload.data.tpsValue);
+        }
+        if (payload.data.transactionDuration != null) {
+            json.append(",\"transaction_duration\":").append(payload.data.transactionDuration);
+        }
+        if (payload.data.transactionId != null) {
+            json.append(",\"transaction_id\":\"").append(payload.data.transactionId).append("\"");
+        }
+        
         json.append("},");
         
         // Metrics section
@@ -225,6 +260,16 @@ public class HttpMetricsCollector implements MetricsCollector {
     }
     
     /**
+     * Extract transaction ID from connection URL (for long running transaction events)
+     */
+    private String extractTransactionIdFromUrl(String url) {
+        if (url != null && url.startsWith("long-tx://")) {
+            return url.substring("long-tx://".length());
+        }
+        return null;
+    }
+    
+    /**
      * HTTP payload structure matching the control plane API
      */
     public static class HttpMetricPayload {
@@ -242,6 +287,11 @@ public class HttpMetricsCollector implements MetricsCollector {
             public long executionTimeMs;
             public String status;
             public String errorMessage;
+            
+            // Additional fields for advanced events
+            public Double tpsValue; // For TPS events
+            public Long transactionDuration; // For long running transaction events
+            public String transactionId; // For transaction events
         }
         
         public static class SystemMetrics {

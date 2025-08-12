@@ -57,10 +57,28 @@ class StatementMethodVisitor extends MethodVisitor {
     public void visitCode() {
         super.visitCode();
         
-        // Insert interception code at the beginning of the method
-        // This is a simplified version - real implementation would be more complex
+        // Insert call to JDBCMethodInterceptor.executeStatement before the original method
+        if ("execute".equals(methodName)) {
+            // Load arguments for JDBCMethodInterceptor.executeStatement
+            // (Object statement, String sql, String connectionUrl, String databaseType)
+            
+            mv.visitVarInsn(Opcodes.ALOAD, 0); // 'this' (statement object)
+            mv.visitLdcInsn("SQL_PLACEHOLDER"); // SQL string placeholder
+            mv.visitLdcInsn("jdbc:h2:mem:testdb"); // Connection URL
+            mv.visitLdcInsn("h2"); // Database type
+            
+            // Call JDBCMethodInterceptor.executeStatement
+            mv.visitMethodInsn(Opcodes.INVOKESTATIC, 
+                "io/kubedb/monitor/agent/JDBCMethodInterceptor", 
+                "executeStatement", 
+                "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z", 
+                false);
+            
+            // Pop the return value since we don't use it here
+            mv.visitInsn(Opcodes.POP);
+        }
         
-        // For now, just add a debug log
+        // Keep debug log for verification
         mv.visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
         mv.visitLdcInsn("JDBC Method intercepted: " + className + "." + methodName);
         mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);

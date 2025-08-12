@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: university-registration-working
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-demo
+  annotations:
+    # No rewrite - direct pass through to the service
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300" 
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - university-registration.bitgaram.info
+    secretName: university-registration-tls
+  rules:
+  - host: university-registration.bitgaram.info
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: university-registration-demo-service
+            port:
+              number: 80
