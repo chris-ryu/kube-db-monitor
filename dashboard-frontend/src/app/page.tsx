@@ -129,6 +129,33 @@ export default function Dashboard() {
   const processMetric = (newMetric: QueryMetrics) => {
     console.log('➕ Adding new metric to state:', newMetric.event_type, newMetric.data?.query_id)
     
+    // Handle TPS events - convert to TransactionEvent for Timeline display
+    if (newMetric.event_type === 'tps_event') {
+      console.log('🚀 Processing TPS event:', newMetric)
+      const tpsValue = newMetric.data?.tps_value || newMetric.data?.execution_time_ms || 0
+      const transactionEvent: TransactionEvent = {
+        id: `tx-tps-${Date.now()}`,
+        transaction_id: `TPS-${tpsValue.toFixed(1)}`,
+        start_time: new Date().toISOString(),
+        status: 'committed',
+        duration_ms: Math.floor(tpsValue * 100), // Visual representation
+        query_count: Math.ceil(tpsValue),
+        total_execution_time_ms: Math.floor(tpsValue * 50),
+        pod_name: newMetric.pod_name || 'unknown-pod',
+        namespace: 'production',
+        queries: [{
+          query_id: `tps-query-${Date.now()}`,
+          sequence_number: 1,
+          sql_pattern: `High TPS detected: ${tpsValue.toFixed(1)} queries/second`,
+          sql_type: 'TPS_EVENT',
+          execution_time_ms: Math.floor(tpsValue * 10),
+          timestamp: new Date().toISOString(),
+          status: 'success'
+        }]
+      }
+      processTransactionEvent(transactionEvent)
+    }
+    
     // Handle Long Running Transaction events
     if (newMetric.event_type === 'long_running_transaction') {
       console.log('🐌 Processing Long Running Transaction event:', newMetric)

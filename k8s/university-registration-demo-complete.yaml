@@ -26,7 +26,7 @@ spec:
       # KubeDB Agent를 수동으로 주입 (Admission Webhook가 없는 경우)
       initContainers:
       - name: kubedb-agent-init
-        image: registry.bitgaram.info/kubedb-monitor/agent:long-tx-5s
+        image: registry.bitgaram.info/kubedb-monitor/agent:fixed-interceptor
         command: ["/bin/sh", "-c"]
         args: 
         - |
@@ -46,7 +46,7 @@ spec:
             cpu: "100m"
       containers:
       - name: university-registration
-        image: registry.bitgaram.info/kubedb-monitor/university-registration:debug-enhanced
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:slow-query
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

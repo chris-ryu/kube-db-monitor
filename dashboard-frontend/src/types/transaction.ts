@@ -30,7 +30,7 @@ export interface TransactionEvent {
 export interface TransactionQuery {
   query_id: string
   sql_pattern: string
-  sql_type: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'OTHER'
+  sql_type: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'OTHER' | 'TPS_EVENT'
   execution_time_ms: number
   timestamp: string
   sequence_number: number

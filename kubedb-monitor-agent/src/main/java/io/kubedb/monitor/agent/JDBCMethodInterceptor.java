@@ -275,16 +275,13 @@ public class JDBCMethodInterceptor {
         logger.info("📊 TPS Metrics: Current={}, Total Queries={}, Execution Time={}ms", 
                    String.format("%.2f", currentTps), currentQueries, executionTimeMs);
         
-        // Generate TPS event if threshold exceeded (e.g., > 10 TPS for demo purposes)
-        if (currentTps > 10) {
+        // Generate TPS event if threshold exceeded (lowered to 2 TPS for demo)
+        if (currentTps > 2) {
+            logger.info("🚨 TPS Threshold Exceeded: {} TPS (threshold: 2)", currentTps);
             generateTpsEvent(currentTps, currentQueries);
         }
         
-        // For demo purposes: simulate long running transaction detection every 10th query
-        if (currentQueries % 10 == 0) {
-            logger.info("🐌 DEMO: Simulating Long Running Transaction for demo purposes");
-            generateLongRunningTransactionEvent("demo-connection-" + currentQueries, LONG_RUNNING_THRESHOLD_MS + 2000); // 7초 duration
-        }
+        // Long Running Transaction detection is handled by checkForLongRunningTransaction() method
     }
     
     /**
@@ -327,14 +324,17 @@ public class JDBCMethodInterceptor {
         
         // Here you would send this to the metrics collector as a special event
         try {
-            getCollector().collect(DBMetrics.builder()
+            logger.info("🔧 DEBUG: About to send TPS_EVENT to collector with TPS={}", tps);
+            DBMetrics tpsMetric = DBMetrics.builder()
                 .sql("TPS_EVENT")
                 .executionTimeMs((long) tps)
                 .databaseType("TPS_METRIC")
                 .connectionUrl("tps://" + String.format("%.2f", tps))
-                .build());
+                .build();
+            getCollector().collect(tpsMetric);
+            logger.info("✅ DEBUG: Successfully sent TPS_EVENT to collector");
         } catch (Exception e) {
-            logger.error("Failed to send TPS event", e);
+            logger.error("❌ Failed to send TPS event", e);
         }
     }
     

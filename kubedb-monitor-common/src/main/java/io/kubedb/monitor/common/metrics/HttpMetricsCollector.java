@@ -94,12 +94,17 @@ public class HttpMetricsCollector implements MetricsCollector {
         String sql = metric.getSql();
         String connectionUrl = metric.getConnectionUrl();
         
+        logger.info("🔍 HttpMetricsCollector DEBUG: Processing metric with SQL='{}', URL='{}'", sql, connectionUrl);
+        
         if ("TPS_EVENT".equals(sql)) {
             payload.eventType = "tps_event";
+            logger.info("🎯 HttpMetricsCollector: Detected TPS_EVENT - setting eventType to 'tps_event'");
         } else if ("LONG_RUNNING_TRANSACTION".equals(sql)) {
             payload.eventType = "long_running_transaction";
+            logger.info("🎯 HttpMetricsCollector: Detected LONG_RUNNING_TRANSACTION - setting eventType to 'long_running_transaction'");
         } else {
             payload.eventType = "query_execution";
+            logger.debug("🎯 HttpMetricsCollector: Regular query - setting eventType to 'query_execution'");
         }
         
         // Data section

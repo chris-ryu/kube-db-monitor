@@ -211,7 +211,8 @@ function TransactionCard({
                       query.sql_type === 'SELECT' ? 'bg-blue-600' : 
                       query.sql_type === 'UPDATE' ? 'bg-orange-600' :
                       query.sql_type === 'INSERT' ? 'bg-green-600' :
-                      query.sql_type === 'DELETE' ? 'bg-red-600' : 'bg-gray-600'
+                      query.sql_type === 'DELETE' ? 'bg-red-600' : 
+                      query.sql_type === 'TPS_EVENT' ? 'bg-purple-600' : 'bg-gray-600'
                     } text-white`}>
                       {query.sql_type}
                     </span>

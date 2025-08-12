@@ -42,6 +42,17 @@ public class CourseService {
         logger.debug("Searching courses with department: {}, keyword: {}, page: {}, size: {}", 
                     departmentId, keyword, page, size);
 
+        // Long Running Transaction 시뮬레이션을 위한 랜덤 sleep (30% 확률로 7-12초)
+        if (Math.random() < 0.3) {
+            int sleepTime = 7000 + (int)(Math.random() * 5000); // 7-12초
+            logger.info("🐌 DEMO: Simulating slow query - sleeping for {}ms to create Long Running Transaction", sleepTime);
+            try {
+                Thread.sleep(sleepTime);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
         Semester currentSemester = getCurrentSemester();
         Pageable pageable = PageRequest.of(page, size, Sort.by("courseId"));
 

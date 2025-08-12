@@ -57,15 +57,28 @@ class StatementMethodVisitor extends MethodVisitor {
     public void visitCode() {
         super.visitCode();
         
+        // Add debug logging to verify method interception is working
+        mv.visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+        mv.visitLdcInsn("🔧 AGENT DEBUG: JDBC Method intercepted: " + className + "." + methodName);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);
+        
         // Insert call to JDBCMethodInterceptor.executeStatement before the original method
-        if ("execute".equals(methodName)) {
-            // Load arguments for JDBCMethodInterceptor.executeStatement
-            // (Object statement, String sql, String connectionUrl, String databaseType)
+        if ("execute".equals(methodName) || "executeQuery".equals(methodName) || "executeUpdate".equals(methodName)) {
+            // Try to extract SQL from method parameters or statement object
+            // For now, use more realistic placeholder values for PostgreSQL
             
             mv.visitVarInsn(Opcodes.ALOAD, 0); // 'this' (statement object)
-            mv.visitLdcInsn("SQL_PLACEHOLDER"); // SQL string placeholder
-            mv.visitLdcInsn("jdbc:h2:mem:testdb"); // Connection URL
-            mv.visitLdcInsn("h2"); // Database type
+            
+            // Try to get SQL parameter if it exists (for execute(String sql) methods)
+            if (methodDescriptor.contains("Ljava/lang/String;")) {
+                mv.visitVarInsn(Opcodes.ALOAD, 1); // SQL parameter
+            } else {
+                mv.visitLdcInsn("INTERCEPTED_SQL_QUERY"); // Placeholder for prepared statements
+            }
+            
+            // Use PostgreSQL connection details
+            mv.visitLdcInsn("jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university");
+            mv.visitLdcInsn("postgresql");
             
             // Call JDBCMethodInterceptor.executeStatement
             mv.visitMethodInsn(Opcodes.INVOKESTATIC, 
@@ -76,11 +89,11 @@ class StatementMethodVisitor extends MethodVisitor {
             
             // Pop the return value since we don't use it here
             mv.visitInsn(Opcodes.POP);
+            
+            // Additional debug log for TPS tracking
+            mv.visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+            mv.visitLdcInsn("✅ AGENT DEBUG: JDBCMethodInterceptor.executeStatement called for TPS tracking");
+            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);
         }
-        
-        // Keep debug log for verification
-        mv.visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
-        mv.visitLdcInsn("JDBC Method intercepted: " + className + "." + methodName);
-        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);
     }
 }
