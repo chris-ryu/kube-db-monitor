@@ -112,7 +112,7 @@ export default function Dashboard() {
   const processWebSocketMessage = (message: any) => {
     console.log('🔍 Processing WebSocket message type:', message.type)
     // Handle different types of WebSocket messages
-    if (message.type === 'query_metrics' || message.type === 'metric') {
+    if (message.type === 'query_metrics' || message.type === 'metric' || message.type === 'query_execution') {
       console.log('📊 Processing query metrics:', message.data)
       processMetric(message.data)
     } else if (message.type === 'transaction_event') {

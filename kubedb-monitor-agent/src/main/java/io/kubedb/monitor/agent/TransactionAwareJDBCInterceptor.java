@@ -5,6 +5,9 @@ import io.kubedb.monitor.common.deadlock.DeadlockEvent;
 import io.kubedb.monitor.common.transaction.TransactionRegistry;
 import io.kubedb.monitor.common.transaction.TransactionStatus;
 import io.kubedb.monitor.common.transaction.TransactionContext;
+import io.kubedb.monitor.common.metrics.DBMetrics;
+import io.kubedb.monitor.common.metrics.MetricsCollector;
+import io.kubedb.monitor.common.metrics.MetricsCollectorFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,6 +25,10 @@ public class TransactionAwareJDBCInterceptor {
     
     private final TransactionRegistry transactionRegistry;
     private final DeadlockDetector deadlockDetector;
+    private volatile MetricsCollector metricsCollector;
+    
+    // Long running transaction threshold (configurable)
+    private static final long LONG_RUNNING_THRESHOLD_MS = 5000; // 5 seconds
     
     // SQL patterns for different types of operations
     private static final Pattern SELECT_FOR_UPDATE_PATTERN = 
@@ -35,6 +42,23 @@ public class TransactionAwareJDBCInterceptor {
                                           DeadlockDetector deadlockDetector) {
         this.transactionRegistry = transactionRegistry;
         this.deadlockDetector = deadlockDetector;
+    }
+    
+    /**
+     * Get or create the metrics collector (lazy initialization)
+     */
+    private MetricsCollector getMetricsCollector() {
+        if (metricsCollector == null) {
+            synchronized (this) {
+                if (metricsCollector == null) {
+                    logger.debug("Initializing MetricsCollector for TransactionAwareJDBCInterceptor");
+                    metricsCollector = MetricsCollectorFactory.createFromSystemConfig();
+                    logger.info("MetricsCollector initialized in TransactionAwareJDBCInterceptor: {}", 
+                               metricsCollector.getClass().getSimpleName());
+                }
+            }
+        }
+        return metricsCollector;
     }
     
     /**
@@ -77,7 +101,55 @@ public class TransactionAwareJDBCInterceptor {
             // Detect lock requests and registrations
             analyzeLockBehavior(transactionId, sql);
             
+            // Check for long running transaction
+            checkForLongRunningTransaction(transactionId, context);
+            
             logger.debug("Added query {} to transaction {} ({}ms)", queryId, transactionId, executionTimeMs);
+        }
+    }
+    
+    /**
+     * Check for long running transactions and emit metrics
+     */
+    private void checkForLongRunningTransaction(String transactionId, TransactionContext context) {
+        try {
+            // Calculate transaction duration from start time to now
+            java.time.Instant now = java.time.Instant.now();
+            long transactionDuration = java.time.Duration.between(context.getStartTime(), now).toMillis();
+            
+            if (transactionDuration > LONG_RUNNING_THRESHOLD_MS) {
+                logger.warn("🐌 Long Running Transaction detected: transactionId={}, duration={}ms (threshold: {}ms)", 
+                           transactionId, transactionDuration, LONG_RUNNING_THRESHOLD_MS);
+                
+                // Generate long running transaction event
+                generateLongRunningTransactionEvent(transactionId, transactionDuration);
+            }
+        } catch (Exception e) {
+            logger.debug("Error checking for long running transaction", e);
+        }
+    }
+    
+    /**
+     * Generate long running transaction event and send to metrics collector
+     */
+    private void generateLongRunningTransactionEvent(String transactionId, long durationMs) {
+        logger.warn("🐌 LONG RUNNING TRANSACTION EVENT: {} duration={}ms", transactionId, durationMs);
+        
+        try {
+            logger.info("🔧 DEBUG: About to send LONG_RUNNING_TRANSACTION event to collector");
+            
+            DBMetrics longTxMetric = DBMetrics.builder()
+                .sql("LONG_RUNNING_TRANSACTION")
+                .executionTimeMs(durationMs)
+                .databaseType("TRANSACTION_METRIC")
+                .connectionUrl("long-tx://" + transactionId)
+                .build();
+                
+            getMetricsCollector().collect(longTxMetric);
+            logger.info("✅ DEBUG: Successfully sent LONG_RUNNING_TRANSACTION event to collector");
+            
+        } catch (Exception e) {
+            logger.error("❌ Failed to send long running transaction event", e);
         }
     }
     
@@ -222,8 +294,24 @@ public class TransactionAwareJDBCInterceptor {
         logger.error("DEADLOCK DETECTED: {} participants, recommended victim: {}", 
                     event.getParticipants().size(), event.getRecommendedVictim());
         
-        // Here you would emit the deadlock event to your monitoring system
-        // For now, just log it
+        // Emit the deadlock event to the monitoring system
+        try {
+            logger.info("🔧 DEBUG: About to send DEADLOCK_EVENT to collector");
+            
+            DBMetrics deadlockMetric = DBMetrics.builder()
+                .sql("DEADLOCK_EVENT")
+                .executionTimeMs(System.currentTimeMillis())
+                .databaseType("DEADLOCK_METRIC")
+                .connectionUrl("deadlock://" + event.getParticipants().size() + "-participants")
+                .build();
+                
+            getMetricsCollector().collect(deadlockMetric);
+            logger.info("✅ DEBUG: Successfully sent DEADLOCK_EVENT to collector");
+            
+        } catch (Exception e) {
+            logger.error("❌ Failed to send deadlock event", e);
+        }
+        
         logger.error("Deadlock details: {}", event);
     }
     
