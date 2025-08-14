@@ -20,7 +20,12 @@ public class JDBCInterceptor implements ClassFileTransformer {
         "java/sql/Connection",
         "java/sql/Statement", 
         "java/sql/PreparedStatement",
-        "java/sql/CallableStatement"
+        "java/sql/CallableStatement",
+        // PostgreSQL JDBC 구현체들
+        "org/postgresql/jdbc/PgConnection",
+        "org/postgresql/jdbc/PgStatement", 
+        "org/postgresql/jdbc/PgPreparedStatement",
+        "org/postgresql/jdbc/PgCallableStatement"
     };
     
     public JDBCInterceptor(AgentConfig config) {
@@ -76,12 +81,19 @@ public class JDBCInterceptor implements ClassFileTransformer {
     }
     
     private boolean isDriverClass(String className) {
-        // Check for common JDBC driver classes
+        // Check for common JDBC driver classes and their Statement implementations
         return className.contains("mysql") ||
                className.contains("postgresql") ||
                className.contains("oracle") ||
                className.contains("h2") ||
-               className.contains("jdbc");
+               className.contains("jdbc") ||
+               // PostgreSQL 구체적 클래스들
+               (className.startsWith("org/postgresql/jdbc/") && className.contains("Statement")) ||
+               // MySQL 구체적 클래스들  
+               (className.startsWith("com/mysql/cj/jdbc/") && className.contains("Statement")) ||
+               // 기타 JDBC 드라이버 Statement 구현체들
+               className.endsWith("PreparedStatement") ||
+               className.endsWith("Statement") && className.contains("jdbc");
     }
     
     private byte[] transformClass(String className, byte[] classfileBuffer) {

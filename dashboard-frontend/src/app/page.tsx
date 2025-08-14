@@ -39,7 +39,7 @@ export default function Dashboard() {
     const useWebSocket = true
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
       (window.location.hostname === 'localhost' 
-        ? 'ws://localhost:8080/ws'
+        ? 'ws://localhost:8081/ws'
         : `wss://kube-db-mon-dashboard.bitgaram.info/ws`)
     
     console.log(`📍 Environment: ${process.env.NODE_ENV}, Host: ${window.location.hostname}`)
@@ -120,6 +120,7 @@ export default function Dashboard() {
       processTransactionEvent(message.data)
     } else if (message.type === 'deadlock_event') {
       console.log('⚠️ Processing deadlock event:', message.data)
+      console.log('🔍 Full message structure:', JSON.stringify(message, null, 2))
       processDeadlockEvent(message.data)
     } else {
       console.warn('❓ Unknown message type:', message.type, message)
@@ -198,10 +199,48 @@ export default function Dashboard() {
     })
   }
 
-  const processDeadlockEvent = (deadlockEvent: DeadlockEvent) => {
+  const processDeadlockEvent = (rawDeadlockData: any) => {
+    console.log('🔍 Raw deadlock data received:', rawDeadlockData)
+    console.log('🔍 Raw data type:', typeof rawDeadlockData)
+    console.log('🔍 Raw data keys:', Object.keys(rawDeadlockData || {}))
+    
+    // Control Plane sends deadlock data directly in message.data (not nested)
+    // WebSocket 메시지에서 DeadlockEvent 구조로 변환
+    const deadlockEvent: DeadlockEvent = {
+      id: rawDeadlockData?.id || `deadlock-${Date.now()}`,
+      participants: rawDeadlockData?.participants || [],
+      detectionTime: rawDeadlockData?.detectionTime || rawDeadlockData?.timestamp || new Date().toISOString(),
+      recommendedVictim: rawDeadlockData?.recommendedVictim || 'unknown',
+      lockChain: rawDeadlockData?.lockChain || [],
+      severity: rawDeadlockData?.severity || 'critical',
+      status: rawDeadlockData?.status || 'active',
+      pod_name: rawDeadlockData?.pod_name,
+      namespace: rawDeadlockData?.namespace || 'unknown',
+      cycleLength: rawDeadlockData?.cycleLength || 2
+    }
+    
+    console.log('🎯 Converted deadlock event:', deadlockEvent)
+    console.log('🎯 Deadlock event participants:', deadlockEvent.participants)
+    console.log('🎯 Deadlock event lockChain:', deadlockEvent.lockChain)
+    
     setDeadlocks(prev => {
-      const updated = [deadlockEvent, ...prev].slice(0, 50)
-      return updated
+      // Check if deadlock with same ID already exists
+      const existingIndex = prev.findIndex(d => d.id === deadlockEvent.id)
+      
+      if (existingIndex >= 0) {
+        // Update existing deadlock
+        console.log('🔄 Updating existing deadlock:', deadlockEvent.id)
+        const updated = [...prev]
+        updated[existingIndex] = deadlockEvent
+        return updated
+      } else {
+        // Add new deadlock
+        const updated = [deadlockEvent, ...prev].slice(0, 50)
+        console.log('📊 Added new deadlock:', deadlockEvent.id)
+        console.log('📊 Updated deadlocks state:', updated.length, 'total deadlocks')
+        console.log('📊 First deadlock in state:', updated[0])
+        return updated
+      }
     })
   }
 

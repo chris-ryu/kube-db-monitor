@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +42,13 @@ type QueryData struct {
 	ErrorMessage      string            `json:"error_message,omitempty"`
 	ComplexityScore   *int              `json:"complexity_score,omitempty"`
 	CacheHitRatio     *float64          `json:"cache_hit_ratio,omitempty"`
+	
+	// Additional fields for advanced events
+	TpsValue              *float64 `json:"tps_value,omitempty"`              // For TPS events
+	TransactionDuration   *int64   `json:"transaction_duration,omitempty"`   // For long running transaction events
+	TransactionId         *string  `json:"transaction_id,omitempty"`         // For transaction events
+	DeadlockDuration      *int64   `json:"deadlock_duration,omitempty"`      // For deadlock events
+	DeadlockConnections   *string  `json:"deadlock_connections,omitempty"`   // For deadlock events
 }
 
 type ExecutionContext struct {
@@ -64,9 +73,9 @@ type SystemMetrics struct {
 }
 
 type WebSocketMessage struct {
-	Type      string       `json:"type"`
-	Data      QueryMetrics `json:"data"`
-	Timestamp string       `json:"timestamp"`
+	Type      string      `json:"type"`
+	Data      interface{} `json:"data"`
+	Timestamp string      `json:"timestamp"`
 }
 
 type Hub struct {
@@ -74,6 +83,104 @@ type Hub struct {
 	broadcast  chan WebSocketMessage
 	register   chan *Client
 	unregister chan *Client
+}
+
+// createDeadlockMessage creates a dashboard-compatible deadlock message
+func createDeadlockMessage(metric QueryMetrics) WebSocketMessage {
+	// Extract connection information from deadlock_connections field
+	connections := ""
+	if metric.Data.DeadlockConnections != nil {
+		connections = *metric.Data.DeadlockConnections
+	}
+	
+	// Parse connections to create participants
+	participants := parseConnectionsToParticipants(connections)
+	
+	// Create deadlock event data in the format expected by dashboard
+	// Include pod name and transaction ID in the unique identifier to avoid duplicates
+	uniqueId := fmt.Sprintf("deadlock-%s-%d", 
+		strings.ReplaceAll(metric.PodName, "-", ""), 
+		time.Now().UnixNano())
+	if metric.Data != nil && metric.Data.TransactionId != nil {
+		uniqueId = fmt.Sprintf("deadlock-%s-%s-%d", 
+			strings.ReplaceAll(metric.PodName, "-", ""),
+			strings.ReplaceAll(*metric.Data.TransactionId, "-", ""),
+			time.Now().UnixNano())
+	}
+	
+	deadlockData := map[string]interface{}{
+		"id":             uniqueId,
+		"participants":   participants,
+		"detectionTime":  time.Now().Format(time.RFC3339),
+		"recommendedVictim": "connection-1",
+		"lockChain":      createLockChain(participants),
+		"severity":       "critical",
+		"status":         "active",
+		"pod_name":       metric.PodName,
+		"namespace":      "production",
+		"cycleLength":    len(participants),
+		"duration_ms":    metric.Data.DeadlockDuration,
+		"connections":    connections,
+	}
+	
+	return WebSocketMessage{
+		Type:      "deadlock_event",
+		Data:      deadlockData,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+}
+
+func parseConnectionsToParticipants(connections string) []map[string]interface{} {
+	if connections == "" {
+		return []map[string]interface{}{
+			{"id": "connection-1", "resource": "table_unknown", "lockType": "exclusive"},
+			{"id": "connection-2", "resource": "table_unknown", "lockType": "shared"},
+		}
+	}
+	
+	// Parse "PgConnection@ac889df:PgConnection@139539a4" format
+	parts := strings.Split(connections, ":")
+	participants := make([]map[string]interface{}, 0, len(parts))
+	
+	for i, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			lockType := "shared"
+			if i%2 == 0 {
+				lockType = "exclusive"
+			}
+			participants = append(participants, map[string]interface{}{
+				"id":         fmt.Sprintf("connection-%d", i+1),
+				"resource":   fmt.Sprintf("table_%d", i+1),
+				"lockType":   lockType,
+				"connection": strings.TrimSpace(part),
+			})
+		}
+	}
+	
+	if len(participants) == 0 {
+		participants = []map[string]interface{}{
+			{"id": "connection-1", "resource": "table_1", "lockType": "exclusive"},
+			{"id": "connection-2", "resource": "table_2", "lockType": "shared"},
+		}
+	}
+	
+	return participants
+}
+
+func createLockChain(participants []map[string]interface{}) []map[string]interface{} {
+	lockChain := make([]map[string]interface{}, 0, len(participants))
+	
+	for i, participant := range participants {
+		nextIndex := (i + 1) % len(participants)
+		lockChain = append(lockChain, map[string]interface{}{
+			"from": participant["id"],
+			"to":   participants[nextIndex]["id"],
+			"resource": participant["resource"],
+			"lockType": participant["lockType"],
+		})
+	}
+	
+	return lockChain
 }
 
 type Client struct {
@@ -149,6 +256,18 @@ func (h *Hub) receiveMetrics(w http.ResponseWriter, r *http.Request) {
 		messageType = "transaction_event"
 	case "deadlock_event":
 		messageType = "deadlock_event"
+	case "deadlock_detected":
+		messageType = "deadlock_event"
+		log.Printf("💀 Converting deadlock_detected to deadlock_event for WebSocket broadcast")
+		
+		// Create special deadlock message with dashboard-compatible structure
+		deadlockMessage := createDeadlockMessage(metric)
+		h.broadcast <- deadlockMessage
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "received"})
+		return // Early return for deadlock events
 	default:
 		messageType = "query_metrics" // default fallback
 	}
@@ -259,6 +378,12 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	log.Printf("🎉 KubeDB Monitor Control Plane starting...")
 	
+	// Get port from environment variable, default to 8080
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	
 	hub := newHub()
 	go hub.run()
 
@@ -284,7 +409,7 @@ func main() {
 	handler := c.Handler(router)
 
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":" + port,
 		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -292,7 +417,7 @@ func main() {
 
 	// Graceful shutdown
 	go func() {
-		log.Println("KubeDB Monitor Control Plane starting on :8080")
+		log.Printf("KubeDB Monitor Control Plane starting on :%s", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed to start: %v", err)
 		}

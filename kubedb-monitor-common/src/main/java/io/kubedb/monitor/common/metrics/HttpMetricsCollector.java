@@ -102,6 +102,9 @@ public class HttpMetricsCollector implements MetricsCollector {
         } else if ("LONG_RUNNING_TRANSACTION".equals(sql)) {
             payload.eventType = "long_running_transaction";
             logger.info("🎯 HttpMetricsCollector: Detected LONG_RUNNING_TRANSACTION - setting eventType to 'long_running_transaction'");
+        } else if ("DEADLOCK_DETECTED".equals(sql)) {
+            payload.eventType = "deadlock_detected";
+            logger.warn("💀 HttpMetricsCollector: Detected DEADLOCK_DETECTED - setting eventType to 'deadlock_detected'");
         } else {
             payload.eventType = "query_execution";
             logger.debug("🎯 HttpMetricsCollector: Regular query - setting eventType to 'query_execution'");
@@ -117,7 +120,7 @@ public class HttpMetricsCollector implements MetricsCollector {
         payload.data.status = metric.isError() ? "ERROR" : "SUCCESS";
         payload.data.errorMessage = metric.getErrorMessage();
         
-        // Add special handling for TPS and Long Running Transaction events
+        // Add special handling for TPS, Long Running Transaction, and Deadlock events
         if ("tps_event".equals(payload.eventType)) {
             payload.data.tpsValue = (double) metric.getExecutionTimeMs(); // TPS value stored in executionTimeMs
             payload.data.sqlPattern = "High TPS detected: " + payload.data.tpsValue + " queries/second";
@@ -127,6 +130,11 @@ public class HttpMetricsCollector implements MetricsCollector {
             payload.data.transactionId = extractTransactionIdFromUrl(connectionUrl);
             payload.data.sqlPattern = "Long running transaction detected: " + payload.data.transactionDuration + "ms";
             logger.warn("🚨 LONG RUNNING TRANSACTION EVENT: Sending long running transaction event ({}ms) to Control Plane", payload.data.transactionDuration);
+        } else if ("deadlock_detected".equals(payload.eventType)) {
+            payload.data.deadlockDuration = metric.getExecutionTimeMs();
+            payload.data.deadlockConnections = extractDeadlockConnectionsFromUrl(connectionUrl);
+            payload.data.sqlPattern = "Deadlock detected: " + payload.data.deadlockDuration + "ms duration";
+            logger.warn("💀 DEADLOCK EVENT: Sending deadlock event ({}ms duration) to Control Plane", payload.data.deadlockDuration);
         }
         
         // Metrics section
@@ -195,6 +203,12 @@ public class HttpMetricsCollector implements MetricsCollector {
         }
         if (payload.data.transactionId != null) {
             json.append(",\"transaction_id\":\"").append(payload.data.transactionId).append("\"");
+        }
+        if (payload.data.deadlockDuration != null) {
+            json.append(",\"deadlock_duration\":").append(payload.data.deadlockDuration);
+        }
+        if (payload.data.deadlockConnections != null) {
+            json.append(",\"deadlock_connections\":\"").append(escapeJson(payload.data.deadlockConnections)).append("\"");
         }
         
         json.append("},");
@@ -275,6 +289,16 @@ public class HttpMetricsCollector implements MetricsCollector {
     }
     
     /**
+     * Extract deadlock connection information from URL (for deadlock events)
+     */
+    private String extractDeadlockConnectionsFromUrl(String url) {
+        if (url != null && url.startsWith("deadlock://")) {
+            return url.substring("deadlock://".length());
+        }
+        return null;
+    }
+    
+    /**
      * HTTP payload structure matching the control plane API
      */
     public static class HttpMetricPayload {
@@ -297,6 +321,8 @@ public class HttpMetricsCollector implements MetricsCollector {
             public Double tpsValue; // For TPS events
             public Long transactionDuration; // For long running transaction events
             public String transactionId; // For transaction events
+            public Long deadlockDuration; // For deadlock events
+            public String deadlockConnections; // For deadlock events
         }
         
         public static class SystemMetrics {

@@ -42,10 +42,14 @@ public class CourseService {
         logger.debug("Searching courses with department: {}, keyword: {}, page: {}, size: {}", 
                     departmentId, keyword, page, size);
 
+        Semester currentSemester = getCurrentSemester();
+        Pageable pageable = PageRequest.of(page, size, Sort.by("courseId"));
+
         // Long Running Transaction 시뮬레이션을 위한 랜덤 sleep (30% 확률로 7-12초)
+        // sleep을 실제 SQL 실행 전에 배치하여 SQL 실행시간이 증가하도록 함
         if (Math.random() < 0.3) {
             int sleepTime = 7000 + (int)(Math.random() * 5000); // 7-12초
-            logger.info("🐌 DEMO: Simulating slow query - sleeping for {}ms to create Long Running Transaction", sleepTime);
+            logger.info("🐌 DEMO: Simulating slow query - sleeping for {}ms BEFORE SQL execution to create Long Running Transaction", sleepTime);
             try {
                 Thread.sleep(sleepTime);
             } catch (InterruptedException e) {
@@ -53,10 +57,7 @@ public class CourseService {
             }
         }
 
-        Semester currentSemester = getCurrentSemester();
-        Pageable pageable = PageRequest.of(page, size, Sort.by("courseId"));
-
-        // 복잡한 검색 쿼리 실행 - JOIN with WHERE conditions
+        // 복잡한 검색 쿼리 실행 - JOIN with WHERE conditions (sleep 후 실행)
         Page<Course> coursePage = courseRepository.searchCourses(
             currentSemester, departmentId, keyword, pageable);
 

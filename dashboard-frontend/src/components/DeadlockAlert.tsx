@@ -89,7 +89,16 @@ function DeadlockCard({ deadlock, onResolve }: {
             )}
           </div>
           <p className="text-gray-300 mt-1">
-            <strong>{deadlock.participants.length} transactions involved:</strong> {deadlock.participants.join(', ')}
+            <strong>{deadlock.participants.length} transactions involved:</strong>{' '}
+            {deadlock.participants.map((participant, index) => (
+              <span key={index}>
+                {typeof participant === 'string' 
+                  ? participant 
+                  : participant.id || participant.connection || JSON.stringify(participant)
+                }
+                {index < deadlock.participants.length - 1 && ', '}
+              </span>
+            ))}
           </p>
         </div>
         
@@ -131,9 +140,14 @@ function DeadlockCard({ deadlock, onResolve }: {
               {deadlock.lockChain.map((chain, index) => (
                 <div key={index} className="flex items-center space-x-2">
                   <span className="text-gray-500">{index + 1}.</span>
-                  <span className="text-yellow-300">{chain}</span>
+                  <span className="text-yellow-300">
+                    {typeof chain === 'string' 
+                      ? chain 
+                      : `${chain.from} → ${chain.to} (${chain.resource || 'unknown resource'}, ${chain.lockType || 'unknown lock'})`
+                    }
+                  </span>
                   {index < deadlock.lockChain.length - 1 && (
-                    <span className="text-red-400">→</span>
+                    <span className="text-red-400">↓</span>
                   )}
                 </div>
               ))}

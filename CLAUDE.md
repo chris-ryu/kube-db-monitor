@@ -1,3 +1,4 @@
+수강 신청 앱 같은 java application의 db 모니터링 솔루션 개발 중
 falllback 코드 작성시 물어보고 진행 할 것.
 mocking 코드 작성시 물어보고 진행 할 것.
 한글로 답변
