@@ -30,8 +30,11 @@ public class ProductionSafeJDBCInterceptor {
     private static final Logger logger = LoggerFactory.getLogger(ProductionSafeJDBCInterceptor.class);
     private static volatile MetricsCollector collector;
     
-    // Long Running Transaction 임계값 (5초)
-    private static final long LONG_RUNNING_THRESHOLD_MS = 5000;
+    // Long Running Transaction 임계값 (환경변수에서 가져오기, 기본값: 4초)
+    private static final long LONG_RUNNING_THRESHOLD_MS = Long.parseLong(
+        System.getenv("LONG_RUNNING_THRESHOLD_MS") != null ? 
+        System.getenv("LONG_RUNNING_THRESHOLD_MS") : "4000"
+    );
     
     // Deadlock 감지 임계값 (10초)
     private static final long DEADLOCK_DETECTION_THRESHOLD_MS = 10000;

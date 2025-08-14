@@ -148,7 +148,9 @@
       "WebFetch(domain:kube-db-mon-controlplane.bitgaram.info)",
       "WebFetch(domain:university-registration.bitgaram.info)",
       "Bash(/tmp/e2e-test.sh:*)",
-      "Bash(/tmp/final-comprehensive-test.sh:*)"
+      "Bash(/tmp/final-comprehensive-test.sh:*)",
+      "Bash(/tmp/real-api-test.sh:*)",
+      "Bash(/tmp/simple-real-api-test.sh:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

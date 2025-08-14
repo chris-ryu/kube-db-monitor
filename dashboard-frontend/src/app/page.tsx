@@ -19,6 +19,9 @@ interface AggregatedMetrics {
 }
 
 export default function Dashboard() {
+  // Long Running Transaction 임계값 설정 (환경변수에서 가져오기, 기본값: 4초)
+  const LONG_RUNNING_THRESHOLD_MS = parseInt(process.env.NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS || '4000')
+  
   const [metrics, setMetrics] = useState<QueryMetrics[]>([])
   const [transactions, setTransactions] = useState<TransactionEvent[]>([])
   const [deadlocks, setDeadlocks] = useState<DeadlockEvent[]>([])
@@ -122,6 +125,35 @@ export default function Dashboard() {
       console.log('⚠️ Processing deadlock event:', message.data)
       console.log('🔍 Full message structure:', JSON.stringify(message, null, 2))
       processDeadlockEvent(message.data)
+    } else if (message.type === 'long_running_transaction') {
+      console.log('🐌 Processing long running transaction event:', message.data)
+      console.log('🔍 DEBUG: Full long running transaction WebSocket message:', JSON.stringify(message, null, 2))
+      console.log('🔍 DEBUG: Message data structure:', message.data)
+      console.log('🔍 DEBUG: Execution time from message:', message.data?.data?.execution_time_ms)
+      // Create TransactionEvent directly for Long Running Transaction
+      const longRunningTx: TransactionEvent = {
+        id: `tx-long-${Date.now()}`,
+        transaction_id: message.data?.data?.query_id || `long-tx-${Date.now()}`,
+        start_time: new Date(Date.now() - (message.data?.data?.execution_time_ms || 5000)).toISOString(),
+        status: 'active',
+        duration_ms: message.data?.data?.execution_time_ms || 5000,
+        query_count: 1,
+        total_execution_time_ms: message.data?.data?.execution_time_ms || 5000,
+        pod_name: message.data?.pod_name || 'unknown-pod',
+        namespace: message.data?.namespace || 'production',
+        queries: [{
+          query_id: message.data?.data?.query_id || `lrt-query-${Date.now()}`,
+          sequence_number: 1,
+          sql_pattern: 'LONG_RUNNING_TRANSACTION',
+          sql_type: 'OTHER',
+          execution_time_ms: message.data?.data?.execution_time_ms || 5000,
+          timestamp: new Date().toISOString(),
+          status: 'success'
+        }]
+      }
+      console.log('🐌 Adding Long Running Transaction to transactions array:', longRunningTx)
+      processTransactionEvent(longRunningTx)
+      processMetric(message.data)
     } else {
       console.warn('❓ Unknown message type:', message.type, message)
     }
@@ -376,7 +408,7 @@ export default function Dashboard() {
   }
 
   const longRunningTransactions = transactions.filter(t => 
-    t.status === 'active' && t.duration_ms && t.duration_ms > 5 * 1000 // > 5 seconds
+    t.status === 'active' && t.duration_ms && t.duration_ms >= LONG_RUNNING_THRESHOLD_MS
   )
 
   return (
@@ -450,7 +482,7 @@ export default function Dashboard() {
           <LongRunningTransactionAlert 
             transactions={longRunningTransactions}
             onKillTransaction={handleKillTransaction}
-            thresholdSeconds={5}
+            thresholdSeconds={LONG_RUNNING_THRESHOLD_MS / 1000}
           />
         </div>
 

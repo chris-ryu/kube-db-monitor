@@ -17,7 +17,7 @@ export function LongRunningTransactionAlert({
   const thresholdMs = thresholdSeconds * 1000
 
   const longRunningTransactions = transactions.filter(tx => 
-    tx.status === 'active' && tx.duration_ms && tx.duration_ms > thresholdMs
+    tx.status === 'active' && tx.duration_ms && tx.duration_ms >= thresholdMs
   )
 
   if (longRunningTransactions.length === 0) {

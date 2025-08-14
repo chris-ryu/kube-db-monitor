@@ -13,3 +13,6 @@ TDD를 적극적으로 활용
 Agent -> Control Plane -> Dashboard 서비스 레이어를 넘어가는 부분에서 이벤트의 포맷이나 스키마가 변경되면 다음 레이어에서 호환 되는지 항상 확인
 
 kubernetes 이미지 확인 시 localhost에 portforward하지 말고 public dns로 연결. 환경변수가 확실히 전달되도록 
+
+agent, control plane, dashboard의 빌드는 script/build-image.sh, 배포는 k8s/kubedb-monitor-deployment.yaml
+업데이트시 배포 삭제후 재배포

@@ -269,6 +269,13 @@ func (h *Hub) receiveMetrics(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "received"})
 		return // Early return for deadlock events
+	case "long_running_transaction":
+		messageType = "long_running_transaction"
+		log.Printf("🐌 Processing long_running_transaction event for WebSocket broadcast")
+		log.Printf("🔍 DEBUG: Full long_running_transaction message: %+v", metric)
+		if metric.Data != nil {
+			log.Printf("🔍 DEBUG: Long running transaction data: %+v", *metric.Data)
+		}
 	default:
 		messageType = "query_metrics" // default fallback
 	}

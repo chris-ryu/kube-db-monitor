@@ -19,7 +19,7 @@ spec:
       - name: registry-secret
       containers:
       - name: dashboard
-        image: registry.bitgaram.info/kubedb-monitor/dashboard:latest
+        image: registry.bitgaram.info/kubedb-monitor/dashboard-frontend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
@@ -31,6 +31,8 @@ spec:
           value: "ws://kubedb-monitor-control-plane:8080"
         - name: WEBSOCKET_URL
           value: "wss://kube-db-mon-dashboard.bitgaram.info/ws"
+        - name: NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS
+          value: "4000"
         resources:
           requests:
             memory: "256Mi"
