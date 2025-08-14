@@ -167,17 +167,18 @@ func parseConnectionsToParticipants(connections string) []map[string]interface{}
 	return participants
 }
 
-func createLockChain(participants []map[string]interface{}) []map[string]interface{} {
-	lockChain := make([]map[string]interface{}, 0, len(participants))
+func createLockChain(participants []map[string]interface{}) []string {
+	lockChain := make([]string, 0, len(participants))
 	
 	for i, participant := range participants {
 		nextIndex := (i + 1) % len(participants)
-		lockChain = append(lockChain, map[string]interface{}{
-			"from": participant["id"],
-			"to":   participants[nextIndex]["id"],
-			"resource": participant["resource"],
-			"lockType": participant["lockType"],
-		})
+		from := fmt.Sprintf("%v", participant["id"])
+		to := fmt.Sprintf("%v", participants[nextIndex]["id"])
+		resource := fmt.Sprintf("%v", participant["resource"])
+		lockType := fmt.Sprintf("%v", participant["lockType"])
+		
+		lockDescription := fmt.Sprintf("%s → %s (%s, %s)", from, to, resource, lockType)
+		lockChain = append(lockChain, lockDescription)
 	}
 	
 	return lockChain

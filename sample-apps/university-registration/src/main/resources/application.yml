@@ -4,10 +4,10 @@ spring:
   
   # Database Configuration
   datasource:
-    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university
+    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/app
     driver-class-name: org.postgresql.Driver
-    username: postgres
-    password: postgres
+    username: app
+    password: PYJihsj3M34zNmYuMcdoWo1Ltyf1NyrdMARrYkRygbeqAfW9dgG0xcHm9j9Y6BTk
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
@@ -160,10 +160,10 @@ spring:
       on-profile: kubernetes
       
   datasource:
-    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university
+    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/app
     driver-class-name: org.postgresql.Driver
-    username: postgres
-    password: postgres
+    username: app
+    password: PYJihsj3M34zNmYuMcdoWo1Ltyf1NyrdMARrYkRygbeqAfW9dgG0xcHm9j9Y6BTk
     hikari:
       maximum-pool-size: 30
       minimum-idle: 10

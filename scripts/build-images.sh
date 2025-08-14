@@ -10,7 +10,9 @@ echo "Building KubeDB Monitor Docker images..."
 
 # Build the project first
 echo "Building Maven project..."
+cd /Users/narzis/workspace/kube-db-monitor/sample-apps/university-registration
 mvn clean package -DskipTests=true
+cd ../..
 
 # Login to registry
 echo "Logging into registry..."
@@ -24,10 +26,20 @@ docker build -f Dockerfile.agent -t "$REGISTRY/kubedb-monitor/agent:latest" .
 echo "Building controller Docker image..."
 docker build -f Dockerfile.controller -t "$REGISTRY/kubedb-monitor/controller:latest" .
 
+# Build and tag dashboard frontend image
+echo "Building dashboard frontend Docker image..."
+docker build -t "$REGISTRY/kubedb-monitor/dashboard-frontend:latest" ./dashboard-frontend/
+
+# Build and tag control plane image
+echo "Building control plane Docker image..."
+docker build -t "$REGISTRY/kubedb-monitor/control-plane:latest" ./control-plane/
+
 # Push images to registry
 echo "Pushing images to registry..."
 docker push "$REGISTRY/kubedb-monitor/agent:latest"
 docker push "$REGISTRY/kubedb-monitor/controller:latest"
+docker push "$REGISTRY/kubedb-monitor/dashboard-frontend:latest"
+docker push "$REGISTRY/kubedb-monitor/control-plane:latest"
 
 echo "Docker images built and pushed successfully:"
 docker images | grep "$REGISTRY/kubedb-monitor"

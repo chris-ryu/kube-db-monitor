@@ -94,7 +94,7 @@ class StatementMethodVisitor extends MethodVisitor {
             // Call ProductionSafeJDBCInterceptor with simple fixed values for testing
             mv.visitVarInsn(Opcodes.ALOAD, 0); // Load 'this' (the statement object)
             mv.visitLdcInsn("ASM_INTERCEPTED_SQL_SIMPLE"); // SQL placeholder - 구별하기 위해 다른 이름 사용
-            mv.visitLdcInsn("jdbc:postgresql://localhost:5432/university_db"); // Connection URL placeholder  
+            mv.visitLdcInsn("jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university"); // Production PostgreSQL URL  
             mv.visitLdcInsn("postgresql"); // Database type
             mv.visitLdcInsn(5000L); // Fixed execution time for testing (5 seconds)
             mv.visitMethodInsn(Opcodes.INVOKESTATIC, 

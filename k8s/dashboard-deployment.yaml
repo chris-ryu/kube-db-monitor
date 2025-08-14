@@ -6,7 +6,7 @@ metadata:
   labels:
     app: kubedb-monitor-dashboard
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: kubedb-monitor-dashboard
@@ -19,7 +19,7 @@ spec:
       - name: registry-secret
       containers:
       - name: dashboard
-        image: registry.bitgaram.info/kubedb-monitor/dashboard:tps-timeline
+        image: registry.bitgaram.info/kubedb-monitor/dashboard:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
@@ -29,6 +29,8 @@ spec:
           value: "production"
         - name: CONTROL_PLANE_URL
           value: "ws://kubedb-monitor-control-plane:8080"
+        - name: WEBSOCKET_URL
+          value: "wss://kube-db-mon-dashboard.bitgaram.info/ws"
         resources:
           requests:
             memory: "256Mi"

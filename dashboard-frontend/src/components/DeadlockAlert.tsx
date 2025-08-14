@@ -94,7 +94,7 @@ function DeadlockCard({ deadlock, onResolve }: {
               <span key={index}>
                 {typeof participant === 'string' 
                   ? participant 
-                  : participant.id || participant.connection || JSON.stringify(participant)
+                  : (participant as any).id || (participant as any).connection || JSON.stringify(participant)
                 }
                 {index < deadlock.participants.length - 1 && ', '}
               </span>
@@ -143,7 +143,7 @@ function DeadlockCard({ deadlock, onResolve }: {
                   <span className="text-yellow-300">
                     {typeof chain === 'string' 
                       ? chain 
-                      : `${chain.from} → ${chain.to} (${chain.resource || 'unknown resource'}, ${chain.lockType || 'unknown lock'})`
+                      : `${(chain as any).from || 'unknown'} → ${(chain as any).to || 'unknown'} (${(chain as any).resource || 'unknown resource'}, ${(chain as any).lockType || 'unknown lock'})`
                     }
                   </span>
                   {index < deadlock.lockChain.length - 1 && (

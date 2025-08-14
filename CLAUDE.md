@@ -9,3 +9,7 @@ TDD를 적극적으로 활용
 
 서버측 코드 작성시 simulation용 코드작업 물어보고 진행할 것 
 디버깅 용도로 만들어진 시뮬레이션, 모킹 코드는 기능 구현 후 반드시 실제 환경으로 삭제, 복구
+
+Agent -> Control Plane -> Dashboard 서비스 레이어를 넘어가는 부분에서 이벤트의 포맷이나 스키마가 변경되면 다음 레이어에서 호환 되는지 항상 확인
+
+kubernetes 이미지 확인 시 localhost에 portforward하지 말고 public dns로 연결. 환경변수가 확실히 전달되도록 

@@ -143,7 +143,12 @@
       "Bash(PORT=8081 ./kubedb-monitor-control-plane)",
       "Bash(/tmp/simple-deadlock-test.sh:*)",
       "Bash(/tmp/corrected-deadlock-test.sh:*)",
-      "Bash(open /tmp/websocket-debug-test.html)"
+      "Bash(open /tmp/websocket-debug-test.html)",
+      "Bash(psql:*)",
+      "WebFetch(domain:kube-db-mon-controlplane.bitgaram.info)",
+      "WebFetch(domain:university-registration.bitgaram.info)",
+      "Bash(/tmp/e2e-test.sh:*)",
+      "Bash(/tmp/final-comprehensive-test.sh:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",
