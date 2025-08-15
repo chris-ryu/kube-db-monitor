@@ -19,8 +19,11 @@ interface AggregatedMetrics {
 }
 
 export default function Dashboard() {
-  // Long Running Transaction 임계값 설정 (환경변수에서 가져오기, 기본값: 4초)
-  const LONG_RUNNING_THRESHOLD_MS = parseInt(process.env.NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS || '4000')
+  // 동적 설정을 위한 state
+  const [dashboardConfig, setDashboardConfig] = useState({
+    title: '🚀 Advanced KubeDB Monitor Dashboard',
+    longRunningThresholdMs: 4000
+  })
   
   const [metrics, setMetrics] = useState<QueryMetrics[]>([])
   const [transactions, setTransactions] = useState<TransactionEvent[]>([])
@@ -36,7 +39,23 @@ export default function Dashboard() {
   })
 
   useEffect(() => {
-    console.log('🚀 Starting Advanced KubeDB Monitor Dashboard')
+    // 서버사이드에서 주입된 런타임 설정 사용
+    const runtimeConfig = (window as any).__RUNTIME_CONFIG__
+    
+    if (runtimeConfig && runtimeConfig.title) {
+      setDashboardConfig(runtimeConfig)
+      console.log(`🚀 Starting ${runtimeConfig.title} (from server-side runtime config)`)
+      console.log(`📊 Long running threshold: ${runtimeConfig.longRunningThresholdMs}ms`)
+    } else {
+      console.error('❌ No runtime config found on window object')
+      // Fallback
+      const fallbackConfig = {
+        title: '🚀 FlowLight DB Monitor Dashboard', // 현재 ConfigMap 값
+        longRunningThresholdMs: 4000
+      }
+      setDashboardConfig(fallbackConfig)
+      console.log(`🚀 Starting ${fallbackConfig.title} (fallback)`)
+    }
     
     // Always try WebSocket connection first
     const useWebSocket = true
@@ -408,7 +427,7 @@ export default function Dashboard() {
   }
 
   const longRunningTransactions = transactions.filter(t => 
-    t.status === 'active' && t.duration_ms && t.duration_ms >= LONG_RUNNING_THRESHOLD_MS
+    t.status === 'active' && t.duration_ms && t.duration_ms >= dashboardConfig.longRunningThresholdMs
   )
 
   return (
@@ -417,7 +436,7 @@ export default function Dashboard() {
         {/* Header */}
         <header className="mb-8">
           <h1 className="text-4xl font-bold text-center mb-4">
-            🚀 Advanced KubeDB Monitor Dashboard
+            {dashboardConfig.title}
           </h1>
           <div className="text-center">
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
@@ -482,7 +501,7 @@ export default function Dashboard() {
           <LongRunningTransactionAlert 
             transactions={longRunningTransactions}
             onKillTransaction={handleKillTransaction}
-            thresholdSeconds={LONG_RUNNING_THRESHOLD_MS / 1000}
+            thresholdSeconds={dashboardConfig.longRunningThresholdMs / 1000}
           />
         </div>
 

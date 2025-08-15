@@ -132,6 +132,11 @@ spec:
           value: "wss://kube-db-mon-dashboard.bitgaram.info/ws"
         - name: NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS
           value: "4000"
+        - name: NEXT_PUBLIC_DASHBOARD_TITLE
+          valueFrom:
+            configMapKeyRef:
+              name: kubedb-monitor-config
+              key: dashboard.title
         resources:
           requests:
             memory: "256Mi"
@@ -251,5 +256,9 @@ data:
   dashboard.env: |
     NODE_ENV=production
     NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS=4000
+    NEXT_PUBLIC_DASHBOARD_TITLE=🚀 Advanced KubeDB Monitor Dashboard
     CONTROL_PLANE_URL=ws://kubedb-monitor-control-plane:8080
     WEBSOCKET_URL=wss://kube-db-mon-dashboard.bitgaram.info/ws
+  
+  # Dashboard Title
+  dashboard.title: "🚀 FlowLight DB Monitor Dashboard"
