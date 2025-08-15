@@ -107,6 +107,16 @@ spec:
         - name: KUBEDB_MONITOR_HTTP_ENDPOINT
           value: "http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
         
+        # Kubernetes Pod와 Namespace 정보
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        
         # 로깅 설정 (KubeDB 모니터링이 잘 보이도록)
         - name: LOGGING_LEVEL_ROOT
           value: "INFO"

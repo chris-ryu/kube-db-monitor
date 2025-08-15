@@ -89,6 +89,7 @@ public class HttpMetricsCollector implements MetricsCollector {
         HttpMetricPayload payload = new HttpMetricPayload();
         payload.timestamp = Instant.now().toString();
         payload.podName = System.getenv("HOSTNAME"); // Kubernetes pod name
+        payload.namespace = System.getenv("NAMESPACE"); // Kubernetes namespace
         
         // Detect special event types based on SQL pattern and connection URL
         String sql = metric.getSql();
@@ -173,6 +174,7 @@ public class HttpMetricsCollector implements MetricsCollector {
         json.append("{");
         json.append("\"timestamp\":\"").append(payload.timestamp).append("\",");
         json.append("\"pod_name\":\"").append(payload.podName != null ? payload.podName : "unknown").append("\",");
+        json.append("\"namespace\":\"").append(payload.namespace != null ? payload.namespace : "unknown").append("\",");
         json.append("\"event_type\":\"").append(payload.eventType).append("\",");
         
         // Data section
@@ -304,6 +306,7 @@ public class HttpMetricsCollector implements MetricsCollector {
     public static class HttpMetricPayload {
         public String timestamp;
         public String podName;
+        public String namespace;
         public String eventType;
         public QueryData data;
         public SystemMetrics metrics;

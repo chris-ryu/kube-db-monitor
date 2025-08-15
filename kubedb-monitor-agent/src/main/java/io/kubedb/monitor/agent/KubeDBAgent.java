@@ -20,12 +20,18 @@ public class KubeDBAgent {
      * Called by the JVM when the agent is loaded via -javaagent
      */
     public static void premain(String agentArgs, Instrumentation inst) {
+        // 명시적 System.out 로그 추가 (로깅 시스템이 초기화되지 않을 경우를 대비)
+        System.out.println("🚀 KubeDB Monitor Agent starting with args: " + agentArgs);
+        
         logger.info("KubeDB Monitor Agent starting...");
         
         instrumentation = inst;
         config = AgentConfig.fromArgs(agentArgs);
         
+        System.out.println("📊 Agent config loaded - enabled: " + config.isEnabled());
+        
         if (!config.isEnabled()) {
+            System.out.println("❌ KubeDB Monitor Agent is disabled");
             logger.info("KubeDB Monitor Agent is disabled");
             return;
         }
@@ -37,6 +43,8 @@ public class KubeDBAgent {
             // Add transformer for JDBC classes
             instrumentation.addTransformer(interceptor, true);
             
+            System.out.println("✅ KubeDB Monitor Agent started successfully");
+            System.out.println("📋 Monitoring databases: " + config.getSupportedDatabases());
             logger.info("KubeDB Monitor Agent started successfully");
             logger.info("Monitoring databases: {}", config.getSupportedDatabases());
             
