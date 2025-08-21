@@ -1,0 +1,116 @@
+# PostgreSQL Agent 없는 기본 테스트용 배포
+# Agent의 영향도를 측정하기 위한 기준선(baseline) 배포
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-no-agent
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-no-agent
+    agent-profile: none
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-no-agent
+  template:
+    metadata:
+      labels:
+        app: university-registration-no-agent
+        agent-profile: none
+      annotations:
+        kubedb.monitor/enable: "false"
+    spec:
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Agent 없이 순수 Spring Boot 실행
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC"
+        
+        # Spring Boot 프로파일
+        - name: SPRING_PROFILES_ACTIVE
+          value: "no-agent"
+        
+        # PostgreSQL 연결 설정
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university?stringtype=unspecified"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "univ-app"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: "qlcrkfka1#"
+        
+        # JPA/Hibernate PostgreSQL 설정
+        - name: SPRING_JPA_DATABASE_PLATFORM
+          value: "org.hibernate.dialect.PostgreSQLDialect"
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "none"
+        - name: SPRING_JPA_SHOW_SQL
+          value: "false"
+        
+        # HikariCP 기본 설정
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "10"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "2"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        
+        # 로깅 (기본)
+        - name: LOGGING_LEVEL_ROOT
+          value: "INFO"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "INFO"
+        
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        
+        # 헬스체크
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+# Service for No-Agent App
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-no-agent-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-no-agent
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-no-agent

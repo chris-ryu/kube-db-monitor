@@ -27,6 +27,7 @@ spec:
       initContainers:
       - name: kubedb-agent-init
         image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        imagePullPolicy: Always
         command: ["/bin/sh", "-c"]
         args: 
         - |
@@ -46,7 +47,7 @@ spec:
             cpu: "100m"
       containers:
       - name: university-registration
-        image: registry.bitgaram.info/kubedb-monitor/university-registration:deadlock-fixed
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -192,10 +193,14 @@ metadata:
   labels:
     app: university-registration-demo
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
     kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
+  tls:
+  - hosts:
+    - university-registration.bitgaram.info
+    secretName: university-registration-tls
   rules:
   - host: university-registration.bitgaram.info
     http:

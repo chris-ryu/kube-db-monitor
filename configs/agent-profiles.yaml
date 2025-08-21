@@ -1,0 +1,193 @@
+# KubeDB Monitor Agent 설정 프로파일
+# PostgreSQL을 기반으로 하며 다른 데이터베이스로 확장 가능한 구조
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubedb-agent-profiles
+  namespace: kubedb-monitor
+data:
+  # Conservative Mode - 프로덕션 고부하 환경용 (안전 모드)
+  conservative.properties: |
+    # 데이터베이스 설정
+    db-types=postgresql
+    
+    # 샘플링 설정 (매우 보수적)
+    sampling-rate=0.01
+    slow-query-threshold=500
+    transaction-threshold=1000
+    connection-leak-threshold=600000
+    
+    # 로깅 설정 (최소화)
+    log-level=ERROR
+    log-to-file=false
+    
+    # ASM 호환성 설정
+    disable-bytecode-transformation=false
+    safe-transformation-mode=true
+    hibernate-compatibility-mode=true
+    spring-boot-compatibility=true
+    
+    # 성능 최적화 (최소 오버헤드)
+    buffer-size=512
+    batch-size=10
+    flush-interval=30000
+    
+    # 메모리 관리 (제한적)
+    max-memory-usage=32MB
+    gc-optimization=false
+    
+    # 모니터링 범위 최소화
+    monitor-ddl=false
+    monitor-dml=false
+    monitor-select=false
+    monitor-connection-only=true
+    
+    # 에러 처리 (매우 보수적)
+    error-threshold=3
+    auto-disable-on-error=true
+    recovery-interval=600000
+
+  # Balanced Mode - 일반 프로덕션 환경용
+  balanced.properties: |
+    # 데이터베이스 설정
+    db-types=postgresql
+    
+    # 샘플링 설정 (균형)
+    sampling-rate=0.1
+    slow-query-threshold=100
+    transaction-threshold=300
+    connection-leak-threshold=180000
+    
+    # 로깅 설정
+    log-level=WARN
+    log-to-file=true
+    log-rotation-size=20MB
+    
+    # 성능 최적화
+    buffer-size=2048
+    batch-size=100
+    flush-interval=5000
+    
+    # 메모리 관리
+    max-memory-usage=128MB
+    gc-optimization=true
+    
+    # 모니터링 범위
+    monitor-ddl=true
+    monitor-dml=true
+    monitor-select=true
+    
+    # 에러 처리
+    error-threshold=20
+    auto-disable-on-error=false
+    recovery-interval=180000
+
+  # Aggressive Mode - 개발/테스트 환경용
+  aggressive.properties: |
+    # 데이터베이스 설정
+    db-types=postgresql
+    
+    # 샘플링 설정 (적극적)
+    sampling-rate=0.5
+    slow-query-threshold=50
+    transaction-threshold=100
+    connection-leak-threshold=60000
+    
+    # 로깅 설정
+    log-level=DEBUG
+    log-to-file=true
+    log-rotation-size=50MB
+    
+    # 성능 최적화
+    buffer-size=4096
+    batch-size=200
+    flush-interval=2000
+    
+    # 메모리 관리
+    max-memory-usage=256MB
+    gc-optimization=false
+    
+    # 모니터링 범위 (전체)
+    monitor-ddl=true
+    monitor-dml=true
+    monitor-select=true
+    monitor-connection-pool=true
+    monitor-prepared-statements=true
+    
+    # 에러 처리
+    error-threshold=50
+    auto-disable-on-error=false
+    recovery-interval=60000
+
+---
+# PostgreSQL 전용 최적화 설정
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubedb-agent-postgresql-optimizations
+  namespace: kubedb-monitor
+data:
+  postgresql-specific.properties: |
+    # PostgreSQL JDBC 드라이버 최적화
+    postgresql.prepared-statement-cache-size=256
+    postgresql.prepared-statement-cache-sql-limit=2048
+    postgresql.default-row-fetch-size=1000
+    
+    # PostgreSQL 트랜잭션 격리 레벨 감지
+    postgresql.track-isolation-level=true
+    postgresql.track-read-only-transactions=true
+    
+    # PostgreSQL 특화 메트릭
+    postgresql.track-vacuum=true
+    postgresql.track-analyze=true
+    postgresql.track-replication-lag=true
+    
+    # HikariCP 특화 설정
+    hikaricp.track-connection-creation=true
+    hikaricp.track-connection-usage=true
+    hikaricp.track-leak-detection=true
+    hikaricp.connection-timeout-threshold=30000
+    
+    # PostgreSQL 확장 모듈 호환성
+    postgresql.extensions.postgis=false
+    postgresql.extensions.uuid-ossp=true
+    postgresql.extensions.hstore=false
+    
+    # 성능 임계값 (PostgreSQL 최적화)
+    postgresql.checkpoint-warning-threshold=300
+    postgresql.wal-writer-delay-threshold=200
+    postgresql.background-writer-delay-threshold=200
+
+---
+# 확장 가능한 데이터베이스 설정 (향후 지원 예정)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubedb-agent-database-extensions
+  namespace: kubedb-monitor
+data:
+  mysql.properties: |
+    # MySQL 확장 설정 (향후 구현)
+    db-types=mysql
+    mysql.innodb-specific=true
+    mysql.query-cache-monitoring=true
+    mysql.binlog-monitoring=false
+    
+  mariadb.properties: |
+    # MariaDB 확장 설정 (향후 구현)  
+    db-types=mariadb
+    mariadb.galera-monitoring=false
+    mariadb.spider-engine=false
+    
+  oracle.properties: |
+    # Oracle 확장 설정 (향후 구현)
+    db-types=oracle
+    oracle.cdb-pdb-monitoring=true
+    oracle.awr-integration=false
+    
+  sqlserver.properties: |
+    # SQL Server 확장 설정 (향후 구현)
+    db-types=sqlserver
+    sqlserver.always-on-monitoring=false
+    sqlserver.extended-events=true

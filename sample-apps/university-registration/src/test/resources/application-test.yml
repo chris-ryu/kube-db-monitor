@@ -1,0 +1,54 @@
+# H2 인메모리 테스트 환경 설정 (PostgreSQL 호환 모드)
+spring:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        connection:
+          provider_disables_autocommit: false
+  
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+    hikari:
+      auto-commit: false
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 10000
+  
+  # H2 콘솔 활성화 (테스트 디버깅용)
+  h2:
+    console:
+      enabled: true
+  
+  # 캐시 비활성화 (테스트 환경)
+  cache:
+    type: none
+
+# 애플리케이션 설정
+app:
+  registration:
+    data-init-mode: test  # 테스트용 최소 데이터
+    data-reset-enabled: true  # 테스트에서는 항상 리셋
+    initialize-sample-data: false  # 구 설정 비활성화
+
+# 로깅 설정
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    com.university.registration: DEBUG
+    org.springframework.test: DEBUG
+
+# 테스트용 Agent 설정 (실제 환경 시뮬레이션)
+test:
+  agent:
+    enabled: true
+    postgresql-compatibility: true
+    avoid-autocommit-state-change: true

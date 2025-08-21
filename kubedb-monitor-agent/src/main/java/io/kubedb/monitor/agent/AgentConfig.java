@@ -30,6 +30,18 @@ public class AgentConfig {
     private final String collectorType;
     private final String collectorEndpoint;
     
+    // PostgreSQL 특화 호환성 설정들
+    private final boolean postgresqlStrictCompatibility;
+    private final boolean excludePreparedStatementTransformation;
+    private final boolean preserveTransactionBoundaries;
+    private final boolean excludeConnectionManagement;
+    private final boolean avoidNullParameterTransformation;
+    private final boolean avoidAutocommitStateChange;
+    private final boolean postgresqlFixUnknownTypesValue;
+    private final boolean postgresqlFixAutocommitConflict;
+    private final boolean safeTransformationMode;
+    private final String logLevel;
+    
     private AgentConfig(Builder builder) {
         this.enabled = builder.enabled;
         this.samplingRate = builder.samplingRate;
@@ -38,6 +50,18 @@ public class AgentConfig {
         this.slowQueryThresholdMs = builder.slowQueryThresholdMs;
         this.collectorType = builder.collectorType;
         this.collectorEndpoint = builder.collectorEndpoint;
+        
+        // PostgreSQL 특화 설정 초기화
+        this.postgresqlStrictCompatibility = builder.postgresqlStrictCompatibility;
+        this.excludePreparedStatementTransformation = builder.excludePreparedStatementTransformation;
+        this.preserveTransactionBoundaries = builder.preserveTransactionBoundaries;
+        this.excludeConnectionManagement = builder.excludeConnectionManagement;
+        this.avoidNullParameterTransformation = builder.avoidNullParameterTransformation;
+        this.avoidAutocommitStateChange = builder.avoidAutocommitStateChange;
+        this.postgresqlFixUnknownTypesValue = builder.postgresqlFixUnknownTypesValue;
+        this.postgresqlFixAutocommitConflict = builder.postgresqlFixAutocommitConflict;
+        this.safeTransformationMode = builder.safeTransformationMode;
+        this.logLevel = builder.logLevel;
     }
     
     /**
@@ -106,6 +130,38 @@ public class AgentConfig {
             builder.collectorEndpoint(args.get("collector-endpoint"));
         }
         
+        // Parse PostgreSQL 특화 호환성 설정들
+        if (args.containsKey("postgresql-strict-compatibility")) {
+            builder.postgresqlStrictCompatibility(Boolean.parseBoolean(args.get("postgresql-strict-compatibility")));
+        }
+        if (args.containsKey("exclude-prepared-statement-transformation")) {
+            builder.excludePreparedStatementTransformation(Boolean.parseBoolean(args.get("exclude-prepared-statement-transformation")));
+        }
+        if (args.containsKey("preserve-transaction-boundaries")) {
+            builder.preserveTransactionBoundaries(Boolean.parseBoolean(args.get("preserve-transaction-boundaries")));
+        }
+        if (args.containsKey("exclude-connection-management")) {
+            builder.excludeConnectionManagement(Boolean.parseBoolean(args.get("exclude-connection-management")));
+        }
+        if (args.containsKey("avoid-null-parameter-transformation")) {
+            builder.avoidNullParameterTransformation(Boolean.parseBoolean(args.get("avoid-null-parameter-transformation")));
+        }
+        if (args.containsKey("avoid-autocommit-state-change")) {
+            builder.avoidAutocommitStateChange(Boolean.parseBoolean(args.get("avoid-autocommit-state-change")));
+        }
+        if (args.containsKey("postgresql-fix-unknown-types-value")) {
+            builder.postgresqlFixUnknownTypesValue(Boolean.parseBoolean(args.get("postgresql-fix-unknown-types-value")));
+        }
+        if (args.containsKey("postgresql-fix-autocommit-conflict")) {
+            builder.postgresqlFixAutocommitConflict(Boolean.parseBoolean(args.get("postgresql-fix-autocommit-conflict")));
+        }
+        if (args.containsKey("safe-transformation-mode")) {
+            builder.safeTransformationMode(Boolean.parseBoolean(args.get("safe-transformation-mode")));
+        }
+        if (args.containsKey("log-level")) {
+            builder.logLevel(args.get("log-level"));
+        }
+        
         AgentConfig config = builder.build();
         
         // Set system properties for metrics collector
@@ -143,6 +199,18 @@ public class AgentConfig {
     public String getCollectorType() { return collectorType; }
     public String getCollectorEndpoint() { return collectorEndpoint; }
     
+    // PostgreSQL 특화 호환성 설정 getters
+    public boolean isPostgresqlStrictCompatibility() { return postgresqlStrictCompatibility; }
+    public boolean isExcludePreparedStatementTransformation() { return excludePreparedStatementTransformation; }
+    public boolean isPreserveTransactionBoundaries() { return preserveTransactionBoundaries; }
+    public boolean isExcludeConnectionManagement() { return excludeConnectionManagement; }
+    public boolean isAvoidNullParameterTransformation() { return avoidNullParameterTransformation; }
+    public boolean isAvoidAutocommitStateChange() { return avoidAutocommitStateChange; }
+    public boolean isPostgresqlFixUnknownTypesValue() { return postgresqlFixUnknownTypesValue; }
+    public boolean isPostgresqlFixAutocommitConflict() { return postgresqlFixAutocommitConflict; }
+    public boolean isSafeTransformationMode() { return safeTransformationMode; }
+    public String getLogLevel() { return logLevel; }
+    
     public static class Builder {
         private boolean enabled = DEFAULT_ENABLED;
         private double samplingRate = DEFAULT_SAMPLING_RATE;
@@ -151,6 +219,18 @@ public class AgentConfig {
         private long slowQueryThresholdMs = DEFAULT_SLOW_QUERY_THRESHOLD_MS;
         private String collectorType = "COMPOSITE"; // Default collector type
         private String collectorEndpoint;
+        
+        // PostgreSQL 특화 호환성 설정들 (기본값: 안전 모드)
+        private boolean postgresqlStrictCompatibility = false;
+        private boolean excludePreparedStatementTransformation = false;
+        private boolean preserveTransactionBoundaries = false;
+        private boolean excludeConnectionManagement = false;
+        private boolean avoidNullParameterTransformation = false;
+        private boolean avoidAutocommitStateChange = false;
+        private boolean postgresqlFixUnknownTypesValue = false;
+        private boolean postgresqlFixAutocommitConflict = false;
+        private boolean safeTransformationMode = false;
+        private String logLevel = "INFO";
         
         public Builder enabled(boolean enabled) {
             this.enabled = enabled;
@@ -187,6 +267,57 @@ public class AgentConfig {
             return this;
         }
         
+        // PostgreSQL 특화 호환성 설정 빌더 메서드들
+        public Builder postgresqlStrictCompatibility(boolean postgresqlStrictCompatibility) {
+            this.postgresqlStrictCompatibility = postgresqlStrictCompatibility;
+            return this;
+        }
+        
+        public Builder excludePreparedStatementTransformation(boolean excludePreparedStatementTransformation) {
+            this.excludePreparedStatementTransformation = excludePreparedStatementTransformation;
+            return this;
+        }
+        
+        public Builder preserveTransactionBoundaries(boolean preserveTransactionBoundaries) {
+            this.preserveTransactionBoundaries = preserveTransactionBoundaries;
+            return this;
+        }
+        
+        public Builder excludeConnectionManagement(boolean excludeConnectionManagement) {
+            this.excludeConnectionManagement = excludeConnectionManagement;
+            return this;
+        }
+        
+        public Builder avoidNullParameterTransformation(boolean avoidNullParameterTransformation) {
+            this.avoidNullParameterTransformation = avoidNullParameterTransformation;
+            return this;
+        }
+        
+        public Builder avoidAutocommitStateChange(boolean avoidAutocommitStateChange) {
+            this.avoidAutocommitStateChange = avoidAutocommitStateChange;
+            return this;
+        }
+        
+        public Builder postgresqlFixUnknownTypesValue(boolean postgresqlFixUnknownTypesValue) {
+            this.postgresqlFixUnknownTypesValue = postgresqlFixUnknownTypesValue;
+            return this;
+        }
+        
+        public Builder postgresqlFixAutocommitConflict(boolean postgresqlFixAutocommitConflict) {
+            this.postgresqlFixAutocommitConflict = postgresqlFixAutocommitConflict;
+            return this;
+        }
+        
+        public Builder safeTransformationMode(boolean safeTransformationMode) {
+            this.safeTransformationMode = safeTransformationMode;
+            return this;
+        }
+        
+        public Builder logLevel(String logLevel) {
+            this.logLevel = logLevel;
+            return this;
+        }
+        
         public AgentConfig build() {
             return new AgentConfig(this);
         }
@@ -202,6 +333,16 @@ public class AgentConfig {
                 ", slowQueryThresholdMs=" + slowQueryThresholdMs +
                 ", collectorType='" + collectorType + '\'' +
                 ", collectorEndpoint='" + collectorEndpoint + '\'' +
+                ", postgresqlStrictCompatibility=" + postgresqlStrictCompatibility +
+                ", excludePreparedStatementTransformation=" + excludePreparedStatementTransformation +
+                ", preserveTransactionBoundaries=" + preserveTransactionBoundaries +
+                ", excludeConnectionManagement=" + excludeConnectionManagement +
+                ", avoidNullParameterTransformation=" + avoidNullParameterTransformation +
+                ", avoidAutocommitStateChange=" + avoidAutocommitStateChange +
+                ", postgresqlFixUnknownTypesValue=" + postgresqlFixUnknownTypesValue +
+                ", postgresqlFixAutocommitConflict=" + postgresqlFixAutocommitConflict +
+                ", safeTransformationMode=" + safeTransformationMode +
+                ", logLevel='" + logLevel + '\'' +
                 '}';
     }
 }

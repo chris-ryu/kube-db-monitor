@@ -26,6 +26,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: university-registration-demo-service
+            name: university-registration-balanced-service
             port:
-              number: 80
+              number: 8082

@@ -1,0 +1,577 @@
+# SQL Server 2022 Linux for KubeDB Monitor Agent Testing
+# Microsoft SQL Server 2022 Linux 컨테이너 구성
+
+---
+# SQL Server Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sqlserver-system
+  labels:
+    name: sqlserver-system
+    database: sqlserver
+
+---
+# SQL Server Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sqlserver-secrets
+  namespace: sqlserver-system
+type: Opaque
+stringData:
+  sa-password: "SqlServer2022!"
+  app-user: "sqlserver_app"
+  app-password: "SqlServerApp123!"
+
+---
+# SQL Server 초기화 스크립트 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sqlserver-init-scripts
+  namespace: sqlserver-system
+data:
+  01-setup-database.sql: |
+    -- SQL Server University Database Setup
+    USE master;
+    GO
+    
+    -- University 데이터베이스 생성
+    IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'university')
+    BEGIN
+        CREATE DATABASE university;
+    END
+    GO
+    
+    USE university;
+    GO
+    
+    -- SQL Server App 사용자 생성
+    IF NOT EXISTS (SELECT name FROM sys.server_principals WHERE name = N'sqlserver_app')
+    BEGIN
+        CREATE LOGIN sqlserver_app WITH PASSWORD = N'SqlServerApp123!';
+    END
+    GO
+    
+    IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = N'sqlserver_app')
+    BEGIN
+        CREATE USER sqlserver_app FOR LOGIN sqlserver_app;
+        ALTER ROLE db_datareader ADD MEMBER sqlserver_app;
+        ALTER ROLE db_datawriter ADD MEMBER sqlserver_app;
+        ALTER ROLE db_ddladmin ADD MEMBER sqlserver_app;
+    END
+    GO
+
+  02-create-schema.sql: |
+    -- SQL Server University Database Schema
+    USE university;
+    GO
+    
+    -- Departments table (SQL Server Identity 사용)
+    CREATE TABLE departments (
+        department_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        name NVARCHAR(100) NOT NULL,
+        code NVARCHAR(10) NOT NULL UNIQUE,
+        created_at DATETIME2 DEFAULT GETDATE()
+    );
+    GO
+    
+    -- SQL Server 인덱스 생성
+    CREATE NONCLUSTERED INDEX IX_departments_code ON departments (code);
+    CREATE NONCLUSTERED INDEX IX_departments_name ON departments (name);
+    GO
+    
+    -- Semesters table
+    CREATE TABLE semesters (
+        semester_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        year INT NOT NULL,
+        season NVARCHAR(10) NOT NULL CHECK (season IN ('SPRING', 'SUMMER', 'FALL', 'WINTER')),
+        is_current BIT DEFAULT 0,
+        registration_start DATETIME2,
+        registration_end DATETIME2,
+        created_at DATETIME2 DEFAULT GETDATE(),
+        CONSTRAINT UQ_semesters_year_season UNIQUE (year, season)
+    );
+    GO
+    
+    CREATE NONCLUSTERED INDEX IX_semesters_current ON semesters (is_current);
+    GO
+    
+    -- Students table
+    CREATE TABLE students (
+        student_id NVARCHAR(20) PRIMARY KEY,
+        name NVARCHAR(100) NOT NULL,
+        email NVARCHAR(100) UNIQUE,
+        department_id BIGINT,
+        year INT,
+        created_at DATETIME2 DEFAULT GETDATE(),
+        CONSTRAINT FK_students_department FOREIGN KEY (department_id) REFERENCES departments(department_id)
+    );
+    GO
+    
+    CREATE NONCLUSTERED INDEX IX_students_department ON students (department_id);
+    CREATE NONCLUSTERED INDEX IX_students_year ON students (year);
+    -- SQL Server Full-text Index
+    CREATE FULLTEXT CATALOG ft_catalog AS DEFAULT;
+    CREATE FULLTEXT INDEX ON students (name) KEY INDEX PK__students;
+    GO
+    
+    -- Courses table (SQL Server specific features)
+    CREATE TABLE courses (
+        course_id NVARCHAR(10) PRIMARY KEY,
+        course_name NVARCHAR(100) NOT NULL,
+        professor NVARCHAR(50) NOT NULL,
+        credits INT NOT NULL DEFAULT 3,
+        capacity INT NOT NULL DEFAULT 30,
+        enrolled_count INT DEFAULT 0,
+        department_id BIGINT NOT NULL,
+        semester_id BIGINT NOT NULL,
+        day_time NVARCHAR(20),
+        classroom NVARCHAR(20),
+        prerequisite_course_id NVARCHAR(10),
+        is_active BIT DEFAULT 1,
+        popularity_level NVARCHAR(10) DEFAULT 'MEDIUM' CHECK (popularity_level IN ('HIGH', 'MEDIUM', 'LOW')),
+        created_at DATETIME2 DEFAULT GETDATE(),
+        version BIGINT DEFAULT 0,
+        CONSTRAINT FK_courses_department FOREIGN KEY (department_id) REFERENCES departments(department_id),
+        CONSTRAINT FK_courses_semester FOREIGN KEY (semester_id) REFERENCES semesters(semester_id),
+        CONSTRAINT FK_courses_prerequisite FOREIGN KEY (prerequisite_course_id) REFERENCES courses(course_id)
+    );
+    GO
+    
+    CREATE NONCLUSTERED INDEX IX_courses_department ON courses (department_id);
+    CREATE NONCLUSTERED INDEX IX_courses_semester ON courses (semester_id);
+    CREATE NONCLUSTERED INDEX IX_courses_popularity ON courses (popularity_level);
+    CREATE NONCLUSTERED INDEX IX_courses_active ON courses (is_active);
+    -- SQL Server Columnstore Index (분석 쿼리 최적화)
+    -- CREATE NONCLUSTERED COLUMNSTORE INDEX NCCI_courses ON courses (department_id, semester_id, popularity_level, enrolled_count);
+    GO
+    
+    -- Enrollments table
+    CREATE TABLE enrollments (
+        enrollment_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        student_id NVARCHAR(20) NOT NULL,
+        course_id NVARCHAR(10) NOT NULL,
+        enrollment_date DATETIME2 DEFAULT GETDATE(),
+        status NVARCHAR(20) DEFAULT 'ENROLLED' CHECK (status IN ('ENROLLED', 'DROPPED', 'COMPLETED')),
+        grade NVARCHAR(5),
+        CONSTRAINT FK_enrollments_student FOREIGN KEY (student_id) REFERENCES students(student_id),
+        CONSTRAINT FK_enrollments_course FOREIGN KEY (course_id) REFERENCES courses(course_id),
+        CONSTRAINT UQ_enrollments_student_course UNIQUE (student_id, course_id)
+    );
+    GO
+    
+    CREATE NONCLUSTERED INDEX IX_enrollments_status ON enrollments (status);
+    CREATE NONCLUSTERED INDEX IX_enrollments_date ON enrollments (enrollment_date);
+    GO
+    
+    -- Cart_items table
+    CREATE TABLE cart_items (
+        cart_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        student_id NVARCHAR(20) NOT NULL,
+        course_id NVARCHAR(10) NOT NULL,
+        added_at DATETIME2 DEFAULT GETDATE(),
+        CONSTRAINT FK_cart_student FOREIGN KEY (student_id) REFERENCES students(student_id),
+        CONSTRAINT FK_cart_course FOREIGN KEY (course_id) REFERENCES courses(course_id),
+        CONSTRAINT UQ_cart_student_course UNIQUE (student_id, course_id)
+    );
+    GO
+    
+    CREATE NONCLUSTERED INDEX IX_cart_added_date ON cart_items (added_at);
+    GO
+
+  03-sample-data.sql: |
+    -- SQL Server sample data insertion
+    USE university;
+    GO
+    
+    -- Departments
+    INSERT INTO departments (name, code) VALUES 
+    (N'SQLServer컴퓨터과학과', N'SSCSE'),
+    (N'SQLServer전자공학과', N'SSEE'),
+    (N'SQLServer기계공학과', N'SSME'),
+    (N'SQLServer경영학과', N'SSBIZ'),
+    (N'SQLServer수학과', N'SSMATH');
+    GO
+    
+    -- Current semester
+    INSERT INTO semesters (year, season, is_current, registration_start, registration_end) VALUES 
+    (2024, N'FALL', 1, '2024-08-01 09:00:00', '2024-08-31 18:00:00');
+    GO
+    
+    -- Sample students
+    INSERT INTO students (student_id, name, email, department_id, year) VALUES 
+    (N'SS2021001', N'김SQLServer', N'kim.sqlserver@example.com', 1, 3),
+    (N'SS2021002', N'이SQLServer', N'lee.sqlserver@example.com', 1, 3),
+    (N'SS2021003', N'박SQLServer', N'park.sqlserver@example.com', 2, 2),
+    (N'SS2021004', N'최SQLServer', N'choi.sqlserver@example.com', 3, 4),
+    (N'SS2021005', N'정SQLServer', N'jung.sqlserver@example.com', 4, 1),
+    (N'SS2024001', N'SQLServer테스트학생', N'sqlserver-test@example.com', 1, 1);
+    GO
+    
+    -- Sample courses
+    INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level) VALUES 
+    (N'SSCSE301', N'SQL Server Database Administration', N'김SQLServer교수', 3, 40, 0, 1, 1, N'월1,수3', N'SQL101', 1, N'HIGH'),
+    (N'SSCSE302', N'SQL Server T-SQL Programming', N'이SQLServer교수', 3, 35, 0, 1, 1, N'화2,목4', N'SQL102', 1, N'MEDIUM'),
+    (N'SSCSE303', N'SQL Server Performance Tuning', N'박SQLServer교수', 3, 30, 0, 1, 1, N'월3,수1', N'SQL103', 1, N'HIGH'),
+    (N'SSEE201', N'SQL Server Always On', N'최SQLServer교수', 3, 25, 0, 2, 1, N'화1,목3', N'SQL201', 1, N'MEDIUM'),
+    (N'SSME301', N'SQL Server Integration Services', N'정SQLServer교수', 3, 20, 0, 3, 1, N'월2,수4', N'SQL301', 1, N'LOW'),
+    (N'SSBIZ101', N'SQL Server Business Intelligence', N'한SQLServer교수', 3, 50, 0, 4, 1, N'화3,목1', N'SQL401', 1, N'HIGH'),
+    (N'SSMATH201', N'SQL Server Analysis Services', N'윤SQLServer교수', 3, 40, 0, 5, 1, N'월4,수2', N'SQL501', 1, N'MEDIUM');
+    GO
+
+  04-procedures.sql: |
+    -- SQL Server 특화 저장 프로시저
+    USE university;
+    GO
+    
+    -- 대용량 데이터 생성 프로시저
+    CREATE OR ALTER PROCEDURE GenerateTestData
+        @NumStudents INT,
+        @NumCourses INT
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        
+        DECLARE @i INT = 1;
+        DECLARE @DeptId BIGINT;
+        
+        BEGIN TRANSACTION;
+        
+        -- 테스트 학생 생성
+        WHILE @i <= @NumStudents
+        BEGIN
+            SET @DeptId = (@i % 5) + 1;
+            
+            BEGIN TRY
+                INSERT INTO students (student_id, name, email, department_id, year)
+                VALUES (
+                    CONCAT('SSTEST', FORMAT(@i, '000000')),
+                    CONCAT('SQLServer테스트학생', @i),
+                    CONCAT('sqlserver-test', @i, '@example.com'),
+                    @DeptId,
+                    (@i % 4) + 1
+                );
+            END TRY
+            BEGIN CATCH
+                -- 중복 무시
+            END CATCH
+            
+            SET @i = @i + 1;
+        END
+        
+        -- 테스트 과목 생성
+        SET @i = 1;
+        WHILE @i <= @NumCourses
+        BEGIN
+            BEGIN TRY
+                INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count,
+                                   department_id, semester_id, day_time, classroom, is_active, popularity_level)
+                VALUES (
+                    CONCAT('SSTEST', FORMAT(@i, '000')),
+                    CONCAT('SQLServer테스트과목', @i),
+                    CONCAT('SQLServer테스트교수', @i),
+                    3, 50, 0,
+                    (@i % 5) + 1, 1,
+                    CONCAT('월', (@i % 5) + 1),
+                    CONCAT('SQL-TEST', FORMAT(@i, '000')),
+                    1,
+                    CASE (@i % 3)
+                        WHEN 0 THEN 'HIGH'
+                        WHEN 1 THEN 'MEDIUM'
+                        ELSE 'LOW'
+                    END
+                );
+            END TRY
+            BEGIN CATCH
+                -- 중복 무시
+            END CATCH
+            
+            SET @i = @i + 1;
+        END
+        
+        COMMIT TRANSACTION;
+        
+        PRINT CONCAT('SQLServer 테스트 데이터 생성 완료: 학생 ', @NumStudents, '명, 과목 ', @NumCourses, '개');
+    END
+    GO
+    
+    -- SQL Server 슬로우 쿼리 생성 프로시저
+    CREATE OR ALTER PROCEDURE CreateSlowQuery
+        @SleepSeconds INT
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        
+        -- SQL Server WAITFOR DELAY 사용
+        DECLARE @DelayTime VARCHAR(8) = CONVERT(VARCHAR(8), DATEADD(SECOND, @SleepSeconds, '00:00:00'), 108);
+        WAITFOR DELAY @DelayTime;
+        
+        -- 복잡한 분석 쿼리 (SQL Server 최적화 테스트)
+        DECLARE @Result TABLE (
+            student_id NVARCHAR(20),
+            student_name NVARCHAR(100),
+            department_name NVARCHAR(100),
+            course_count INT,
+            course_list NVARCHAR(MAX)
+        );
+        
+        INSERT INTO @Result
+        SELECT 
+            s.student_id,
+            s.name AS student_name,
+            d.name AS department_name,
+            COUNT(c.course_id) AS course_count,
+            STRING_AGG(c.course_name, ', ') AS course_list
+        FROM students s
+        LEFT JOIN departments d ON s.department_id = d.department_id
+        LEFT JOIN enrollments e ON s.student_id = e.student_id
+        LEFT JOIN courses c ON e.course_id = c.course_id
+        WHERE s.student_id LIKE 'SSTEST%'
+        GROUP BY s.student_id, s.name, d.name;
+        
+        SELECT COUNT(*) AS TotalRows FROM @Result;
+        PRINT 'SQL Server 슬로우 쿼리 완료';
+    END
+    GO
+    
+    -- SQL Server 통계 수집 프로시저
+    CREATE OR ALTER PROCEDURE CollectSQLServerStats
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        
+        -- 테이블 통계 업데이트
+        UPDATE STATISTICS departments;
+        UPDATE STATISTICS semesters;
+        UPDATE STATISTICS students;
+        UPDATE STATISTICS courses;
+        UPDATE STATISTICS enrollments;
+        UPDATE STATISTICS cart_items;
+        
+        -- 인덱스 사용량 조회
+        SELECT 
+            OBJECT_NAME(i.OBJECT_ID) AS table_name,
+            i.name AS index_name,
+            s.user_seeks,
+            s.user_scans,
+            s.user_lookups,
+            s.user_updates
+        FROM sys.dm_db_index_usage_stats s
+        INNER JOIN sys.indexes i ON s.OBJECT_ID = i.OBJECT_ID AND s.index_id = i.index_id
+        WHERE OBJECTPROPERTY(s.OBJECT_ID,'IsUserTable') = 1;
+        
+        PRINT 'SQL Server 통계 수집 완료';
+    END
+    GO
+    
+    -- 학과별 통계 함수 (Table-Valued Function)
+    CREATE OR ALTER FUNCTION GetDepartmentStats()
+    RETURNS TABLE
+    AS
+    RETURN (
+        SELECT 
+            d.name AS department_name,
+            COUNT(DISTINCT s.student_id) AS student_count,
+            COUNT(DISTINCT c.course_id) AS course_count,
+            AVG(CAST(c.enrolled_count AS FLOAT)) AS avg_enrolled
+        FROM departments d
+        LEFT JOIN students s ON d.department_id = s.department_id
+        LEFT JOIN courses c ON d.department_id = c.department_id
+        GROUP BY d.department_id, d.name
+    );
+    GO
+    
+    -- 초기 테스트 데이터 생성
+    EXEC GenerateTestData @NumStudents = 50, @NumCourses = 15;
+    EXEC CollectSQLServerStats;
+    GO
+    
+    -- SQL Server App 사용자 권한 부여
+    GRANT EXECUTE ON GenerateTestData TO sqlserver_app;
+    GRANT EXECUTE ON CreateSlowQuery TO sqlserver_app;
+    GRANT EXECUTE ON CollectSQLServerStats TO sqlserver_app;
+    GRANT SELECT ON GetDepartmentStats TO sqlserver_app;
+    GO
+
+---
+# SQL Server StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sqlserver-cluster
+  namespace: sqlserver-system
+  labels:
+    app: sqlserver-cluster
+spec:
+  serviceName: sqlserver-cluster-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sqlserver-cluster
+  template:
+    metadata:
+      labels:
+        app: sqlserver-cluster
+    spec:
+      containers:
+      - name: sqlserver
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: ACCEPT_EULA
+          value: "Y"
+        - name: MSSQL_SA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sqlserver-secrets
+              key: sa-password
+        - name: MSSQL_PID
+          value: "Developer"
+        - name: MSSQL_TCP_PORT
+          value: "1433"
+        - name: MSSQL_AGENT_ENABLED
+          value: "true"
+        ports:
+        - containerPort: 1433
+          name: sqlserver
+        volumeMounts:
+        - name: sqlserver-data
+          mountPath: /var/opt/mssql
+        - name: sqlserver-init-scripts
+          mountPath: /opt/mssql-scripts
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        livenessProbe:
+          exec:
+            command:
+            - /opt/mssql-tools/bin/sqlcmd
+            - -S
+            - localhost
+            - -U
+            - SA
+            - -P
+            - $(MSSQL_SA_PASSWORD)
+            - -Q
+            - "SELECT 1"
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - /opt/mssql-tools/bin/sqlcmd
+            - -S
+            - localhost
+            - -U
+            - SA
+            - -P
+            - $(MSSQL_SA_PASSWORD)
+            - -Q
+            - "SELECT 1"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      
+      # SQL Server 초기화 스크립트 실행
+      initContainers:
+      - name: sqlserver-init
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          echo "SQL Server initialization starting..."
+          sleep 30
+          
+          # 메인 컨테이너의 SQL Server가 준비될 때까지 대기
+          for i in {1..60}; do
+            if /opt/mssql-tools/bin/sqlcmd -S sqlserver-cluster -U SA -P "$MSSQL_SA_PASSWORD" -Q "SELECT 1" > /dev/null 2>&1; then
+              echo "SQL Server is ready"
+              break
+            fi
+            echo "Waiting for SQL Server to be ready... ($i/60)"
+            sleep 10
+          done
+          
+          # 초기화 스크립트 실행
+          echo "Executing initialization scripts..."
+          for script in /opt/mssql-scripts/*.sql; do
+            if [ -f "$script" ]; then
+              echo "Executing $script..."
+              /opt/mssql-tools/bin/sqlcmd -S sqlserver-cluster -U SA -P "$MSSQL_SA_PASSWORD" -i "$script"
+            fi
+          done
+          
+          echo "SQL Server initialization completed"
+        env:
+        - name: MSSQL_SA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sqlserver-secrets
+              key: sa-password
+        volumeMounts:
+        - name: sqlserver-init-scripts
+          mountPath: /opt/mssql-scripts
+      
+      volumes:
+      - name: sqlserver-init-scripts
+        configMap:
+          name: sqlserver-init-scripts
+          defaultMode: 0755
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: sqlserver-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+
+---
+# SQL Server Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: sqlserver-cluster-headless
+  namespace: sqlserver-system
+  labels:
+    app: sqlserver-cluster
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 1433
+    targetPort: 1433
+    protocol: TCP
+    name: sqlserver
+  selector:
+    app: sqlserver-cluster
+
+---
+# SQL Server Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: sqlserver-cluster-rw
+  namespace: sqlserver-system
+  labels:
+    app: sqlserver-cluster
+    service-type: read-write
+spec:
+  type: ClusterIP
+  ports:
+  - port: 1433
+    targetPort: 1433
+    protocol: TCP
+    name: sqlserver
+  selector:
+    app: sqlserver-cluster

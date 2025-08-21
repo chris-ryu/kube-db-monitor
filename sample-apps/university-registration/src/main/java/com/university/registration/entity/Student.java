@@ -12,8 +12,11 @@ public class Student {
     @Column(name = "student_id", length = 10)
     private String studentId;
 
-    @Column(nullable = false, length = 50)
+    @Column(name = "student_name", nullable = false, length = 50)
     private String name;
+
+    @Column(name = "email", nullable = false, length = 100)
+    private String email;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "department_id", nullable = false)
@@ -46,9 +49,10 @@ public class Student {
     // Constructors
     public Student() {}
 
-    public Student(String studentId, String name, Department department, Integer grade, String password) {
+    public Student(String studentId, String name, String email, Department department, Integer grade, String password) {
         this.studentId = studentId;
         this.name = name;
+        this.email = email;
         this.department = department;
         this.grade = grade;
         this.password = password;
@@ -60,6 +64,9 @@ public class Student {
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
 
     public Department getDepartment() { return department; }
     public void setDepartment(Department department) { this.department = department; }

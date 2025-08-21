@@ -37,7 +37,7 @@ import java.util.concurrent.Executors;
  * KubeDB Monitor 테스트를 위한 데이터 상태 확인
  */
 @RestController
-@RequestMapping("/api/data")
+@RequestMapping("/data")
 @CrossOrigin(origins = "*")
 public class DataController {
 

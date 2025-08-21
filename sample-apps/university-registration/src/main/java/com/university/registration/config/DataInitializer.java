@@ -7,18 +7,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 /**
  * 샘플 데이터 초기화 컴포넌트
  * KubeDB Monitor 테스트를 위한 현실적인 대학교 수강신청 시스템 데이터 생성
  */
 @Component
+@Profile("!test")  // test 프로파일에서만 비활성화, development는 활성화
 public class DataInitializer {
 
     private static final Logger logger = LoggerFactory.getLogger(DataInitializer.class);
@@ -64,15 +67,13 @@ public class DataInitializer {
         try {
             initializeSemesters();
             initializeDepartments();
-            initializeStudents();
             initializeCourses();
-            initializeEnrollments();
-            initializeCarts();
+            initializeStudents(); // Cart API 테스트를 위해 학생 데이터 추가
             
             long duration = System.currentTimeMillis() - startTime;
             logger.info("Data initialization completed successfully in {} ms", duration);
-            logger.info("Created: {} departments, {} students, {} courses", 
-                       departments.size(), students.size(), courses.size());
+            logger.info("Created: {} departments, {} courses, {} students", 
+                       departments.size(), courses.size(), students.size());
             
         } catch (Exception e) {
             logger.error("Failed to initialize data: {}", e.getMessage(), e);
@@ -137,35 +138,30 @@ public class DataInitializer {
     }
 
     /**
-     * 학생 정보 초기화 (1000명)
+     * 학생 정보 초기화 (테스트용 5명만 생성)
      */
     private void initializeStudents() {
-        logger.info("Initializing 1000 students...");
+        logger.info("Initializing test students...");
         
-        String[] firstNames = {"민준", "서준", "도윤", "예준", "시우", "주원", "하준", "지호", "준서", "준우",
-                              "지민", "서윤", "서연", "지우", "하은", "윤서", "소율", "지안", "채원", "예은"};
-        String[] lastNames = {"김", "이", "박", "최", "정", "강", "조", "윤", "장", "임", "한", "오", "서", "신", "권"};
+        String[] firstNames = {"민준", "서준", "지민", "서윤", "하준"};
+        String[] lastNames = {"김", "이", "박", "최", "정"};
         
-        // 학년별 분포: 1학년(300명), 2학년(300명), 3학년(250명), 4학년(150명)
-        int[] gradeDistribution = {300, 300, 250, 150};
-        int studentIdCounter = 1;
-        
-        for (int grade = 1; grade <= 4; grade++) {
-            for (int i = 0; i < gradeDistribution[grade - 1]; i++) {
-                Student student = new Student();
-                student.setStudentId(String.format("%d%03d", 2020 + (4 - grade), studentIdCounter++));
-                student.setName(lastNames[random.nextInt(lastNames.length)] + 
-                               firstNames[random.nextInt(firstNames.length)]);
-                student.setGrade(grade);
-                student.setDepartment(departments.get(random.nextInt(departments.size())));
-                student.setPassword("password123"); // 간단한 비밀번호
-                student.setTotalCredits(grade * 15 + random.nextInt(10)); // 학년에 맞는 학점
-                students.add(studentRepository.save(student));
-                
-                if (i % 100 == 0) {
-                    logger.debug("Created {} students for grade {}", i, grade);
-                }
-            }
+        // 테스트용 학생 5명 생성
+        for (int i = 0; i < 5; i++) {
+            Student student = new Student();
+            String studentId = String.format("2024%03d", i + 1); // 2024001, 2024002, ...
+            String name = lastNames[i] + firstNames[i];
+            
+            student.setStudentId(studentId);
+            student.setName(name);
+            student.setEmail(studentId + "@university.edu");
+            student.setGrade(2); // 모두 2학년으로 설정
+            student.setDepartment(departments.get(i % departments.size()));
+            student.setPassword("password123");
+            student.setTotalCredits(30 + random.nextInt(10)); // 2학년 적정 학점
+            
+            students.add(studentRepository.save(student));
+            logger.debug("Created test student: {} ({})", studentId, name);
         }
     }
 
@@ -189,13 +185,13 @@ public class DataInitializer {
         String[] professors = {"김교수", "이교수", "박교수", "최교수", "정교수", "강교수", 
                               "조교수", "윤교수", "장교수", "임교수"};
         
-        String[] timeSlots = {"MON_1", "MON_2", "TUE_1", "TUE_2", "WED_1", "WED_2", 
-                             "THU_1", "THU_2", "FRI_1", "FRI_2"};
+        String[] timeSlots = {"월1", "월2", "화1", "화2", "수1", "수2", 
+                             "목1", "목2", "금1", "금2"};
         
         Semester currentSemester = semesters.get(0);
         int courseCounter = 1;
         
-        for (int i = 0; i < 200; i++) {
+        for (int i = 0; i < 10; i++) { // UI 테스트용으로 10개만 생성
             Course course = new Course();
             course.setCourseId(String.format("CS%03d", courseCounter++));
             course.setCourseName(courseNames[random.nextInt(courseNames.length)]);
@@ -207,7 +203,14 @@ public class DataInitializer {
             course.setSemester(currentSemester);
             course.setClassroom("강의실" + (100 + random.nextInt(200)));
             
-            if (random.nextDouble() < 0.7) {
+            // 모든 과목에 시간 정보 설정 (일부는 복수 시간으로 설정)
+            if (random.nextDouble() < 0.3) {
+                // 30% 확률로 복수 시간 설정 (예: "월1,수2")
+                String[] twoSlots = {timeSlots[random.nextInt(timeSlots.length)], 
+                                   timeSlots[random.nextInt(timeSlots.length)]};
+                course.setDayTime(String.join(",", twoSlots));
+            } else {
+                // 70% 확률로 단일 시간 설정
                 course.setDayTime(timeSlots[random.nextInt(timeSlots.length)]);
             }
             
@@ -283,7 +286,7 @@ public class DataInitializer {
             List<Course> availableCourses = courses.stream()
                 .filter(c -> c.getEnrolledCount() < c.getCapacity())
                 .filter(c -> !isStudentEnrolledInCourse(student, c))
-                .toList();
+                .collect(Collectors.toList());
             
             if (availableCourses.isEmpty()) continue;
             

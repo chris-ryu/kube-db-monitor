@@ -1,4 +1,7 @@
 수강 신청 앱 같은 java application의 db 모니터링 솔루션 개발 중
+
+docs/agent-jdbc-compatibility-guide.md 파일 참조해서 수정 진행
+
 falllback 코드 작성시 물어보고 진행 할 것.
 mocking 코드 작성시 물어보고 진행 할 것.
 한글로 답변
@@ -16,3 +19,7 @@ kubernetes 이미지 확인 시 localhost에 portforward하지 말고 public dns
 
 agent, control plane, dashboard의 빌드는 script/build-image.sh, 배포는 k8s/kubedb-monitor-deployment.yaml
 업데이트시 배포 삭제후 재배포
+
+postgres-system 네임스페이스 postgres-cluster-1 팟으로 연결하면 psql연결 가능
+
+직접 YAML 수정하지 말고 make build-and-deploy 로 다시 빌드하고 재배포해야 합니다.

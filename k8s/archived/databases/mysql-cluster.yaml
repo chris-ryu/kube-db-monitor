@@ -1,0 +1,482 @@
+# MySQL Cluster for KubeDB Monitor Agent Testing
+# Percona Operator for MySQL 기반 MySQL 8.0 클러스터 구성
+
+---
+# MySQL Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mysql-system
+  labels:
+    name: mysql-system
+    database: mysql
+
+---
+# MySQL Secret for root user
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-root-secret
+  namespace: mysql-system
+type: Opaque
+stringData:
+  root: "rootpassword123!"
+
+---
+# MySQL Secret for application user
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-app-secret
+  namespace: mysql-system
+type: Opaque
+stringData:
+  username: "mysql-app"
+  password: "mysqlapp123!"
+
+---
+# MySQL ConfigMap for custom configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: mysql-system
+data:
+  my.cnf: |
+    [mysqld]
+    # Basic settings
+    bind-address = 0.0.0.0
+    port = 3306
+    
+    # Character set
+    character-set-server = utf8mb4
+    collation-server = utf8mb4_unicode_ci
+    
+    # InnoDB settings for KubeDB Monitor testing
+    innodb_buffer_pool_size = 256M
+    innodb_log_file_size = 64M
+    innodb_flush_log_at_trx_commit = 2
+    innodb_flush_method = O_DIRECT
+    
+    # Query logging for monitoring tests
+    general_log = 1
+    general_log_file = /var/log/mysql/general.log
+    slow_query_log = 1
+    slow_query_log_file = /var/log/mysql/slow.log
+    long_query_time = 0.1
+    
+    # Connection settings
+    max_connections = 200
+    max_connect_errors = 10000
+    connect_timeout = 60
+    
+    # Binary logging (for replication testing)
+    log-bin = mysql-bin
+    binlog_format = ROW
+    expire_logs_days = 7
+    
+    # Performance schema for monitoring
+    performance_schema = ON
+    performance_schema_consumer_events_statements_current = ON
+    performance_schema_consumer_events_statements_history = ON
+    
+    # SQL mode
+    sql_mode = STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO
+
+---
+# MySQL StatefulSet (Custom deployment for testing)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-cluster
+  namespace: mysql-system
+  labels:
+    app: mysql-cluster
+spec:
+  serviceName: mysql-cluster-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-cluster
+  template:
+    metadata:
+      labels:
+        app: mysql-cluster
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-root-secret
+              key: root
+        - name: MYSQL_DATABASE
+          value: "university"
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysql-app-secret
+              key: username
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-app-secret
+              key: password
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: mysql-config
+          mountPath: /etc/mysql/conf.d/my.cnf
+          subPath: my.cnf
+        - name: mysql-logs
+          mountPath: /var/log/mysql
+        livenessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - mysql
+            - -h
+            - localhost
+            - -u
+            - root
+            - -p$(MYSQL_ROOT_PASSWORD)
+            - -e
+            - "SELECT 1"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      
+      # MySQL 설정 초기화 initContainer
+      initContainers:
+      - name: mysql-init
+        image: mysql:8.0
+        command: 
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "MySQL initialization container started"
+          
+          # Wait for MySQL to be ready (in main container)
+          echo "Waiting for MySQL main container to start..."
+          sleep 30
+          
+          # Create university database and user (will be handled by main container env vars)
+          echo "MySQL initialization completed"
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-root-secret
+              key: root
+        volumeMounts:
+        - name: mysql-init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+      
+      volumes:
+      - name: mysql-config
+        configMap:
+          name: mysql-config
+      - name: mysql-logs
+        emptyDir: {}
+      - name: mysql-init-scripts
+        configMap:
+          name: mysql-init-scripts
+          defaultMode: 0755
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+# MySQL Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-cluster-headless
+  namespace: mysql-system
+  labels:
+    app: mysql-cluster
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 3306
+    targetPort: 3306
+    protocol: TCP
+    name: mysql
+  selector:
+    app: mysql-cluster
+
+---
+# MySQL Read-Write Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-cluster-rw
+  namespace: mysql-system
+  labels:
+    app: mysql-cluster
+    service-type: read-write
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3306
+    targetPort: 3306
+    protocol: TCP
+    name: mysql
+  selector:
+    app: mysql-cluster
+
+---
+# MySQL 초기화 스크립트 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-scripts
+  namespace: mysql-system
+data:
+  01-create-university-schema.sql: |
+    -- MySQL University Database Schema for KubeDB Monitor Testing
+    USE university;
+    
+    -- Create departments table
+    CREATE TABLE IF NOT EXISTS departments (
+        department_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        code VARCHAR(10) NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create semesters table
+    CREATE TABLE IF NOT EXISTS semesters (
+        semester_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        year INT NOT NULL,
+        season ENUM('SPRING', 'SUMMER', 'FALL', 'WINTER') NOT NULL,
+        is_current BOOLEAN DEFAULT FALSE,
+        registration_start TIMESTAMP,
+        registration_end TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_year_season (year, season)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create students table
+    CREATE TABLE IF NOT EXISTS students (
+        student_id VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) UNIQUE,
+        department_id BIGINT,
+        year INT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (department_id) REFERENCES departments(department_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create courses table (MySQL specific schema)
+    CREATE TABLE IF NOT EXISTS courses (
+        course_id VARCHAR(10) PRIMARY KEY,
+        course_name VARCHAR(100) NOT NULL,
+        professor VARCHAR(50) NOT NULL,
+        credits INT NOT NULL,
+        capacity INT NOT NULL,
+        enrolled_count INT DEFAULT 0,
+        department_id BIGINT NOT NULL,
+        semester_id BIGINT NOT NULL,
+        day_time VARCHAR(20),
+        classroom VARCHAR(20),
+        prerequisite_course_id VARCHAR(10),
+        is_active BOOLEAN DEFAULT TRUE,
+        popularity_level ENUM('HIGH', 'MEDIUM', 'LOW') DEFAULT 'MEDIUM',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        version BIGINT DEFAULT 0,
+        FOREIGN KEY (department_id) REFERENCES departments(department_id),
+        FOREIGN KEY (semester_id) REFERENCES semesters(semester_id),
+        FOREIGN KEY (prerequisite_course_id) REFERENCES courses(course_id),
+        INDEX idx_department (department_id),
+        INDEX idx_semester (semester_id),
+        INDEX idx_popularity (popularity_level)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create enrollments table
+    CREATE TABLE IF NOT EXISTS enrollments (
+        enrollment_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        student_id VARCHAR(20) NOT NULL,
+        course_id VARCHAR(10) NOT NULL,
+        enrollment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status ENUM('ENROLLED', 'DROPPED', 'COMPLETED') DEFAULT 'ENROLLED',
+        grade VARCHAR(5),
+        FOREIGN KEY (student_id) REFERENCES students(student_id),
+        FOREIGN KEY (course_id) REFERENCES courses(course_id),
+        UNIQUE KEY unique_student_course (student_id, course_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create cart_items table
+    CREATE TABLE IF NOT EXISTS cart_items (
+        cart_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        student_id VARCHAR(20) NOT NULL,
+        course_id VARCHAR(10) NOT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(student_id),
+        FOREIGN KEY (course_id) REFERENCES courses(course_id),
+        UNIQUE KEY unique_cart_item (student_id, course_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  02-insert-sample-data.sql: |
+    -- Insert sample data for MySQL testing
+    USE university;
+    
+    -- Insert departments
+    INSERT IGNORE INTO departments (name, code) VALUES 
+    ('컴퓨터과학과', 'CSE'),
+    ('전자공학과', 'EE'),
+    ('기계공학과', 'ME'),
+    ('경영학과', 'BIZ'),
+    ('수학과', 'MATH');
+    
+    -- Insert current semester
+    INSERT IGNORE INTO semesters (year, season, is_current, registration_start, registration_end) VALUES 
+    (2024, 'FALL', true, '2024-08-01 09:00:00', '2024-08-31 18:00:00');
+    
+    -- Insert sample students
+    INSERT IGNORE INTO students (student_id, name, email, department_id, year) VALUES 
+    ('2021001', '김철수', 'kim.mysql@example.com', 1, 3),
+    ('2021002', '이영희', 'lee.mysql@example.com', 1, 3),
+    ('2021003', '박민수', 'park.mysql@example.com', 2, 2),
+    ('2021004', '최지영', 'choi.mysql@example.com', 3, 4),
+    ('2021005', '정하늘', 'jung.mysql@example.com', 4, 1),
+    ('2024001', 'MySQL테스트학생', 'mysql-test@example.com', 1, 1);
+    
+    -- Insert sample courses
+    INSERT IGNORE INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level) VALUES 
+    ('CSE301', 'MySQL 데이터베이스시스템', '김MySQL교수', 3, 40, 0, 1, 1, '월1,수3', 'IT101', true, 'HIGH'),
+    ('CSE302', 'MySQL 성능최적화', '이MySQL교수', 3, 35, 0, 1, 1, '화2,목4', 'IT102', true, 'MEDIUM'),
+    ('CSE303', 'MySQL 복제와 샤딩', '박MySQL교수', 3, 30, 0, 1, 1, '월3,수1', 'IT103', true, 'HIGH'),
+    ('EE201', 'InnoDB 스토리지엔진', '최MySQL교수', 3, 25, 0, 2, 1, '화1,목3', 'EE201', true, 'MEDIUM'),
+    ('ME301', 'MySQL 클러스터', '정MySQL교수', 3, 20, 0, 3, 1, '월2,수4', 'ME301', true, 'LOW'),
+    ('BIZ101', 'MySQL 경영정보시스템', '한MySQL교수', 3, 50, 0, 4, 1, '화3,목1', 'BIZ101', true, 'HIGH'),
+    ('MATH201', 'MySQL 통계와 분석', '윤MySQL교수', 3, 40, 0, 5, 1, '월4,수2', 'MATH201', true, 'MEDIUM');
+    
+    -- Grant privileges to mysql-app user
+    GRANT SELECT, INSERT, UPDATE, DELETE ON university.* TO 'mysql-app'@'%';
+    FLUSH PRIVILEGES;
+
+  03-create-test-procedures.sql: |
+    -- MySQL 특화 테스트 프로시저 및 함수
+    USE university;
+    
+    DELIMITER $$
+    
+    -- 대용량 데이터 생성 프로시저 (Agent 테스트용)
+    CREATE PROCEDURE IF NOT EXISTS generate_test_data(IN num_students INT, IN num_courses INT)
+    BEGIN
+        DECLARE i INT DEFAULT 1;
+        DECLARE course_counter INT DEFAULT 1;
+        
+        -- 테스트 학생 생성
+        WHILE i <= num_students DO
+            INSERT IGNORE INTO students (student_id, name, email, department_id, year) 
+            VALUES (
+                CONCAT('TEST', LPAD(i, 6, '0')), 
+                CONCAT('테스트학생', i), 
+                CONCAT('test', i, '@mysql-test.com'), 
+                (i % 5) + 1, 
+                (i % 4) + 1
+            );
+            SET i = i + 1;
+        END WHILE;
+        
+        -- 테스트 과목 생성
+        SET i = 1;
+        WHILE i <= num_courses DO
+            INSERT IGNORE INTO courses (
+                course_id, course_name, professor, credits, capacity, enrolled_count,
+                department_id, semester_id, day_time, classroom, is_active, popularity_level
+            ) VALUES (
+                CONCAT('TEST', LPAD(course_counter, 3, '0')),
+                CONCAT('테스트과목', i),
+                CONCAT('테스트교수', i),
+                3,
+                50,
+                0,
+                (i % 5) + 1,
+                1,
+                CONCAT('월', (i % 5) + 1),
+                CONCAT('TEST', LPAD(i, 3, '0')),
+                true,
+                CASE (i % 3) 
+                    WHEN 0 THEN 'HIGH'
+                    WHEN 1 THEN 'MEDIUM'
+                    ELSE 'LOW'
+                END
+            );
+            SET i = i + 1;
+            SET course_counter = course_counter + 1;
+        END WHILE;
+        
+        SELECT CONCAT('생성된 테스트 데이터: 학생 ', num_students, '명, 과목 ', num_courses, '개') AS result;
+    END$$
+    
+    -- 슬로우 쿼리 생성 함수 (Agent 모니터링 테스트용)
+    CREATE PROCEDURE IF NOT EXISTS create_slow_query(IN sleep_seconds INT)
+    BEGIN
+        SELECT SLEEP(sleep_seconds) AS slow_query_result;
+        SELECT COUNT(*) FROM courses c 
+        JOIN departments d ON c.department_id = d.department_id
+        JOIN semesters s ON c.semester_id = s.semester_id;
+    END$$
+    
+    -- 복잡한 조인 쿼리 (모니터링 테스트용)
+    CREATE PROCEDURE IF NOT EXISTS complex_join_test()
+    BEGIN
+        SELECT 
+            s.student_id,
+            s.name AS student_name,
+            d.name AS department_name,
+            c.course_name,
+            c.professor,
+            e.status,
+            e.enrollment_date
+        FROM students s
+        LEFT JOIN departments d ON s.department_id = d.department_id
+        LEFT JOIN enrollments e ON s.student_id = e.student_id
+        LEFT JOIN courses c ON e.course_id = c.course_id
+        LEFT JOIN semesters sem ON c.semester_id = sem.semester_id
+        WHERE sem.is_current = true
+        ORDER BY s.student_id, c.course_name;
+    END$$
+    
+    DELIMITER ;
+    
+    -- 테스트 데이터 생성 (기본 100명 학생, 20개 과목)
+    CALL generate_test_data(100, 20);
+    
+    -- 인덱스 최적화 확인
+    ANALYZE TABLE departments, semesters, students, courses, enrollments, cart_items;

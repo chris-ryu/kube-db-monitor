@@ -31,17 +31,23 @@ public interface CourseRepository extends JpaRepository<Course, String> {
     List<Course> findBySemesterAndDepartment(Semester semester, Department department);
 
     // 검색 기능
-    @Query("""
-        SELECT c FROM Course c 
-        WHERE c.semester = :semester 
-        AND c.isActive = true 
-        AND (:departmentId IS NULL OR c.department.id = :departmentId)
-        AND (:keyword IS NULL OR 
-             LOWER(c.courseName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR 
-             LOWER(c.professor) LIKE LOWER(CONCAT('%', :keyword, '%')))
-        ORDER BY c.courseId
-        """)
-    Page<Course> searchCourses(@Param("semester") Semester semester,
+    @Query(value = "SELECT * FROM courses c " +
+        "WHERE c.semester_id = CAST(:semesterId AS BIGINT) " +
+        "AND c.is_active = true " + 
+        "AND (CAST(:departmentId AS BIGINT) IS NULL OR c.department_id = CAST(:departmentId AS BIGINT)) " +
+        "AND (CAST(:keyword AS VARCHAR) IS NULL OR " + 
+        "     LOWER(CAST(c.course_name AS VARCHAR)) LIKE LOWER(CONCAT('%', CAST(:keyword AS VARCHAR), '%')) OR " + 
+        "     LOWER(CAST(c.professor AS VARCHAR)) LIKE LOWER(CONCAT('%', CAST(:keyword AS VARCHAR), '%'))) " +
+        "ORDER BY c.course_id ASC", 
+        countQuery = "SELECT COUNT(*) FROM courses c " +
+        "WHERE c.semester_id = CAST(:semesterId AS BIGINT) " +
+        "AND c.is_active = true " + 
+        "AND (CAST(:departmentId AS BIGINT) IS NULL OR c.department_id = CAST(:departmentId AS BIGINT)) " +
+        "AND (CAST(:keyword AS VARCHAR) IS NULL OR " + 
+        "     LOWER(CAST(c.course_name AS VARCHAR)) LIKE LOWER(CONCAT('%', CAST(:keyword AS VARCHAR), '%')) OR " + 
+        "     LOWER(CAST(c.professor AS VARCHAR)) LIKE LOWER(CONCAT('%', CAST(:keyword AS VARCHAR), '%')))",
+        nativeQuery = true)
+    Page<Course> searchCourses(@Param("semesterId") Long semesterId,
                               @Param("departmentId") Long departmentId,
                               @Param("keyword") String keyword,
                               Pageable pageable);

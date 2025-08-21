@@ -1,0 +1,290 @@
+# JDBC 드라이버별 호환성 프로파일
+# PostgreSQL 문제 해결을 위한 설정과 향후 다른 DB 확장을 위한 템플릿
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubedb-agent-jdbc-compatibility
+  namespace: kubedb-monitor
+  labels:
+    app: kubedb-monitor-agent
+    component: jdbc-compatibility
+data:
+  # PostgreSQL JDBC 호환성 설정
+  postgresql-compatibility.properties: |
+    # PostgreSQL JDBC 드라이버 정보
+    driver.class=org.postgresql.Driver
+    driver.version.minimum=42.0.0
+    compatibility.level=production-ready
+    
+    # 문제가 확인된 클래스들 - ASM 변환에서 제외
+    exclude.classes=org.postgresql.jdbc.PgConnection,\
+                   org.postgresql.jdbc.PgPreparedStatement,\
+                   org.postgresql.jdbc.PgCallableStatement,\
+                   org.postgresql.jdbc.PgResultSet,\
+                   org.postgresql.util.PSQLException,\
+                   org.postgresql.util.PSQLState,\
+                   org.postgresql.core.QueryExecutor,\
+                   org.postgresql.core.BaseConnection
+    
+    # 안전한 변환 모드 설정
+    safe.transformation.mode=true
+    preserve.transaction.boundaries=true
+    exclude.prepared.statement.setNull=true
+    exclude.connection.commit.rollback=true
+    
+    # PostgreSQL 특화 문제 해결
+    postgresql.fix.unknown.types.value=true
+    postgresql.fix.autocommit.conflict=true
+    postgresql.preserve.type.handling=true
+    
+    # 모니터링 범위 제한 (안전성 우선)
+    monitor.connection.lifecycle=true
+    monitor.statement.execution=true
+    monitor.prepared.statement.parameters=false
+    monitor.transaction.boundaries=false
+    
+    # 알려진 문제 패턴 회피
+    avoid.null.parameter.transformation=true
+    avoid.autocommit.state.change=true
+    avoid.transaction.manager.interference=true
+    
+    # 로깅 및 디버깅
+    log.excluded.transformations=true
+    debug.jdbc.compatibility=false
+
+  # MySQL 호환성 설정 (향후 구현)
+  mysql-compatibility.properties: |
+    # MySQL JDBC 드라이버 정보
+    driver.class=com.mysql.cj.jdbc.Driver
+    driver.version.minimum=8.0.0
+    compatibility.level=planned
+    
+    # MySQL 예상 제외 클래스들
+    exclude.classes=com.mysql.cj.jdbc.ConnectionImpl,\
+                   com.mysql.cj.jdbc.ClientPreparedStatement,\
+                   com.mysql.cj.jdbc.ServerPreparedStatement,\
+                   com.mysql.cj.jdbc.CallableStatement,\
+                   com.mysql.cj.exceptions.MysqlErrorNumbers,\
+                   com.mysql.cj.protocol.Protocol
+    
+    # MySQL 특화 예상 이슈들
+    mysql.timezone.handling=preserve-original
+    mysql.ssl.certificate.validation=exclude-from-monitoring
+    mysql.innodb.specific.handling=true
+    
+    # 모니터링 설정
+    monitor.innodb.buffer.pool=true
+    monitor.query.cache=true
+    monitor.binary.log=false
+
+  # MariaDB 호환성 설정 (향후 구현)
+  mariadb-compatibility.properties: |
+    # MariaDB JDBC 드라이버 정보
+    driver.class=org.mariadb.jdbc.Driver
+    driver.version.minimum=3.0.0
+    compatibility.level=planned
+    
+    # MariaDB는 MySQL 기반이지만 고유 특성 존재
+    exclude.classes=org.mariadb.jdbc.Connection,\
+                   org.mariadb.jdbc.MariaDbPreparedStatement,\
+                   org.mariadb.jdbc.CallableStatement
+    
+    # MariaDB 특화 기능
+    mariadb.galera.cluster.aware=true
+    mariadb.query.response.time=monitor
+    mariadb.spider.engine.support=false
+
+  # Oracle 호환성 설정 (향후 구현)
+  oracle-compatibility.properties: |
+    # Oracle JDBC 드라이버 정보
+    driver.class=oracle.jdbc.driver.OracleDriver
+    driver.version.minimum=21.0.0
+    compatibility.level=experimental
+    
+    # Oracle 특화 클래스들 - 매우 복잡함
+    exclude.classes=oracle.jdbc.driver.OracleConnection,\
+                   oracle.jdbc.driver.OraclePreparedStatement,\
+                   oracle.jdbc.driver.OracleCallableStatement,\
+                   oracle.jdbc.driver.OracleResultSet,\
+                   oracle.sql.ARRAY,\
+                   oracle.sql.STRUCT,\
+                   oracle.sql.CLOB,\
+                   oracle.sql.BLOB
+    
+    # Oracle 특화 기능들
+    oracle.plsql.support=exclude-from-transformation
+    oracle.cursor.handling=preserve-original
+    oracle.cdb.pdb.awareness=true
+    oracle.advanced.queuing=false
+
+  # SQL Server 호환성 설정 (향후 구현)  
+  sqlserver-compatibility.properties: |
+    # SQL Server JDBC 드라이버 정보
+    driver.class=com.microsoft.sqlserver.jdbc.SQLServerDriver
+    driver.version.minimum=12.0.0
+    compatibility.level=experimental
+    
+    # SQL Server 특화 클래스들
+    exclude.classes=com.microsoft.sqlserver.jdbc.SQLServerConnection,\
+                   com.microsoft.sqlserver.jdbc.SQLServerPreparedStatement,\
+                   com.microsoft.sqlserver.jdbc.SQLServerCallableStatement,\
+                   com.microsoft.sqlserver.jdbc.SQLServerResultSet
+    
+    # SQL Server 특화 기능들
+    sqlserver.tsql.support=exclude-from-transformation
+    sqlserver.always.on.awareness=true
+    sqlserver.integrated.authentication=preserve-original
+
+---
+# JDBC 호환성 테스트 설정
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jdbc-compatibility-tests
+  namespace: kubedb-monitor
+data:
+  test-queries.sql: |
+    -- PostgreSQL 호환성 테스트 쿼리들
+    
+    -- 1. NULL 파라미터 처리 테스트 (문제가 되었던 쿼리)
+    SELECT course_id, course_name FROM courses 
+    WHERE semester_id = ? AND is_active = true 
+    AND (? IS NULL OR department_id = ?) 
+    AND (? IS NULL OR LOWER(course_name) LIKE LOWER(CONCAT('%', ?, '%')));
+    
+    -- 2. 복잡한 JOIN 테스트
+    SELECT s.student_id, s.name, c.course_name, d.name as dept_name
+    FROM students s 
+    LEFT JOIN enrollments e ON s.student_id = e.student_id
+    LEFT JOIN courses c ON e.course_id = c.course_id  
+    LEFT JOIN departments d ON s.department_id = d.department_id
+    WHERE s.year = ? AND (? IS NULL OR d.department_id = ?);
+    
+    -- 3. 트랜잭션 테스트
+    BEGIN;
+    INSERT INTO students (student_id, name, department_id) VALUES (?, ?, ?);
+    UPDATE courses SET enrolled_count = enrolled_count + 1 WHERE course_id = ?;
+    COMMIT;
+    
+    -- 4. PreparedStatement 배치 테스트
+    INSERT INTO cart_items (student_id, course_id) VALUES (?, ?);
+    -- (여러 번 실행됨)
+
+  compatibility-check.sh: |
+    #!/bin/bash
+    # JDBC 호환성 자동 검증 스크립트
+    
+    DB_TYPE=$1
+    POD_NAME=$2
+    NAMESPACE=$3
+    
+    echo "=== JDBC 호환성 검증: $DB_TYPE ==="
+    
+    # 1. 기본 연결 테스트
+    echo "1. 기본 연결 테스트..."
+    kubectl exec $POD_NAME -n $NAMESPACE -- \
+      curl -f http://localhost:8080/actuator/health/db
+    
+    # 2. 단순 쿼리 테스트
+    echo "2. 단순 쿼리 테스트..."  
+    kubectl exec $POD_NAME -n $NAMESPACE -- \
+      curl -f http://localhost:8080/api/courses
+    
+    # 3. 복잡한 쿼리 테스트 (NULL 파라미터 포함)
+    echo "3. 복잡한 쿼리 테스트..."
+    kubectl exec $POD_NAME -n $NAMESPACE -- \
+      curl -f "http://localhost:8080/api/courses/search?department_id=&query="
+    
+    # 4. 트랜잭션 테스트
+    echo "4. 트랜잭션 테스트..."
+    kubectl exec $POD_NAME -n $NAMESPACE -- \
+      curl -X POST -f http://localhost:8080/api/students \
+      -H "Content-Type: application/json" \
+      -d '{"studentId":"TEST001","name":"Test Student","departmentId":1}'
+    
+    # 5. 에러 로그 확인
+    echo "5. JDBC 관련 에러 확인..."
+    kubectl logs $POD_NAME -n $NAMESPACE --tail=50 | \
+      grep -E "(SQLException|JDBC.*ERROR|Unknown Types|Cannot commit|Unable to rollback)" | \
+      wc -l
+    
+    echo "=== 호환성 검증 완료 ==="
+
+---
+# 호환성 문제 해결 가이드
+apiVersion: v1
+kind: ConfigMap  
+metadata:
+  name: jdbc-troubleshooting-guide
+  namespace: kubedb-monitor
+data:
+  troubleshooting-steps.md: |
+    # JDBC 호환성 문제 해결 단계별 가이드
+    
+    ## 1단계: 문제 식별
+    ```bash
+    # Agent 로그에서 변환 관련 에러 확인
+    kubectl logs <pod-name> | grep -E "(ASM|transform|instrument.*failed)"
+    
+    # 애플리케이션 로그에서 JDBC 에러 확인  
+    kubectl logs <pod-name> | grep -E "(SQLException|JDBC.*ERROR)"
+    ```
+    
+    ## 2단계: 임시 해결 (긴급시)
+    ```yaml
+    # Agent 완전 비활성화
+    env:
+    - name: JAVA_OPTS
+      value: "-Xmx512m -Xms256m -XX:+UseG1GC"
+    ```
+    
+    ## 3단계: 안전 모드 활성화
+    ```yaml
+    # 최소 모니터링 모드
+    env:
+    - name: JAVA_OPTS  
+      value: "-javaagent:agent.jar=safe-transformation-mode=true,exclude-prepared-statement-transformation=true"
+    ```
+    
+    ## 4단계: DB별 특화 설정 적용
+    ```yaml
+    # PostgreSQL 특화 안전 설정
+    env:
+    - name: JAVA_OPTS
+      value: "-javaagent:agent.jar=postgresql-strict-compatibility=true,exclude-type-handling=true"
+    ```
+
+  known-solutions.yaml: |
+    # 알려진 JDBC 호환성 문제별 해결책
+    
+    postgresql_issues:
+      - problem: "Unknown Types value in PgPreparedStatement.setNull"
+        solution: "exclude-prepared-statement-transformation=true"
+        severity: "critical"
+        
+      - problem: "Cannot commit when autoCommit is enabled"  
+        solution: "preserve-transaction-boundaries=true"
+        severity: "high"
+        
+      - problem: "Unable to rollback against JDBC Connection"
+        solution: "exclude-connection-management=true"
+        severity: "high"
+    
+    mysql_issues:
+      - problem: "Timezone handling issues (예상)"
+        solution: "mysql-timezone-handling=preserve-original"
+        severity: "medium"
+        
+      - problem: "SSL certificate validation (예상)"
+        solution: "exclude-ssl-related-classes=true" 
+        severity: "low"
+    
+    oracle_issues:
+      - problem: "PL/SQL CURSOR handling (예상)"
+        solution: "oracle-plsql-support=exclude-from-transformation"
+        severity: "critical"
+        
+      - problem: "CDB/PDB connection management (예상)"
+        solution: "oracle-cdb-pdb-awareness=true"
+        severity: "high"

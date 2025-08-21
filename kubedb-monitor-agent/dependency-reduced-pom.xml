@@ -103,5 +103,47 @@
       <version>2.2.224</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>42.7.2</version>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <artifactId>checker-qual</artifactId>
+          <groupId>org.checkerframework</groupId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>com.zaxxer</groupId>
+      <artifactId>HikariCP</artifactId>
+      <version>5.0.1</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>1.19.3</version>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <artifactId>testcontainers</artifactId>
+          <groupId>org.testcontainers</groupId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>1.19.3</version>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <artifactId>jdbc</artifactId>
+          <groupId>org.testcontainers</groupId>
+        </exclusion>
+      </exclusions>
+    </dependency>
   </dependencies>
 </project>
