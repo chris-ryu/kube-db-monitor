@@ -1,0 +1,361 @@
+# MySQL Agent 호환성 테스트용 배포 설정
+# MySQL 8.0 + HikariCP + Spring Boot 환경에서의 KubeDB Monitor Agent 테스트
+
+---
+# MySQL Agent Testing Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubedb-monitor-mysql
+  labels:
+    name: kubedb-monitor-mysql
+    database: mysql
+
+---
+# MySQL Agent 설정 ConfigMap (MySQL 전용 최적화)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-agent-config
+  namespace: kubedb-monitor-mysql
+data:
+  mysql-conservative.properties: |
+    # MySQL Conservative Agent 설정
+    db-types=mysql
+    sampling-rate=0.05
+    slow-query-threshold=200
+    transaction-threshold=500
+    log-level=ERROR
+    mysql.innodb-monitoring=true
+    mysql.performance-schema-enabled=true
+    mysql.query-cache-monitoring=false
+    hikaricp.leak-detection-threshold=60000
+    
+  mysql-balanced.properties: |
+    # MySQL Balanced Agent 설정
+    db-types=mysql
+    sampling-rate=0.1
+    slow-query-threshold=100
+    transaction-threshold=300
+    log-level=WARN
+    mysql.innodb-monitoring=true
+    mysql.performance-schema-enabled=true
+    mysql.query-cache-monitoring=true
+    hikaricp.leak-detection-threshold=60000
+    
+  mysql-aggressive.properties: |
+    # MySQL Aggressive Agent 설정
+    db-types=mysql
+    sampling-rate=0.5
+    slow-query-threshold=50
+    transaction-threshold=100
+    log-level=DEBUG
+    mysql.innodb-monitoring=true
+    mysql.performance-schema-enabled=true
+    mysql.query-cache-monitoring=true
+    mysql.binlog-monitoring=true
+    hikaricp.leak-detection-threshold=30000
+
+---
+# MySQL University Registration App - Conservative Mode
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-mysql-conservative
+  namespace: kubedb-monitor-mysql
+  labels:
+    app: university-registration-mysql-conservative
+    database: mysql
+    agent-profile: conservative
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-mysql-conservative
+  template:
+    metadata:
+      labels:
+        app: university-registration-mysql-conservative
+        database: mysql
+        agent-profile: conservative
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/profile: "mysql-conservative"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["/bin/sh", "-c"]
+        args: 
+        - |
+          echo "Copying KubeDB Monitor Agent (MySQL Conservative Mode)..."
+          cp /opt/kubedb-agent/kubedb-monitor-agent.jar /opt/shared-agent/kubedb-monitor-agent.jar
+          echo "MySQL Agent copied successfully"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/shared-agent
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # MySQL Agent Conservative 설정
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=profile=mysql-conservative,db-types=mysql,sampling-rate=0.05,slow-query-threshold=200,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=ERROR"
+        
+        # Spring Boot 프로파일 (MySQL)
+        - name: SPRING_PROFILES_ACTIVE
+          value: "mysql,conservative"
+        
+        # MySQL 연결 설정
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:mysql://mysql-cluster-rw.mysql-system:3306/university?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
+        - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+          value: "com.mysql.cj.jdbc.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: mysql-app-credentials
+              key: username
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-app-credentials
+              key: password
+        
+        # JPA/Hibernate MySQL 설정
+        - name: SPRING_JPA_DATABASE_PLATFORM
+          value: "org.hibernate.dialect.MySQLDialect"
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "none"
+        - name: SPRING_JPA_SHOW_SQL
+          value: "false"
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL
+          value: "false"
+        
+        # HikariCP MySQL 최적화 (Conservative)
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "5"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "1"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        - name: SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT
+          value: "600000"
+        - name: SPRING_DATASOURCE_HIKARI_MAX_LIFETIME
+          value: "1800000"
+        - name: SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT
+          value: "5000"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TEST_QUERY
+          value: "SELECT 1"
+        
+        # MySQL 특화 설정
+        - name: SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_CACHE_PREP_STMTS
+          value: "true"
+        - name: SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_PREP_STMT_CACHE_SIZE
+          value: "250"
+        - name: SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_PREP_STMT_CACHE_SQL_LIMIT
+          value: "2048"
+        - name: SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_USE_SERVER_PREP_STMTS
+          value: "true"
+        
+        # 로깅 (Conservative)
+        - name: LOGGING_LEVEL_ROOT
+          value: "WARN"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "WARN"
+        - name: LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_JDBC
+          value: "WARN"
+        
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        
+        # MySQL 헬스체크
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/db
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+      
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+# MySQL University Registration App - Balanced Mode
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-mysql-balanced
+  namespace: kubedb-monitor-mysql
+  labels:
+    app: university-registration-mysql-balanced
+    database: mysql
+    agent-profile: balanced
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-mysql-balanced
+  template:
+    metadata:
+      labels:
+        app: university-registration-mysql-balanced
+        database: mysql
+        agent-profile: balanced
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/profile: "mysql-balanced"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["/bin/sh", "-c"]
+        args: 
+        - |
+          echo "Copying KubeDB Monitor Agent (MySQL Balanced Mode)..."
+          cp /opt/kubedb-agent/kubedb-monitor-agent.jar /opt/shared-agent/kubedb-monitor-agent.jar
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/shared-agent
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # MySQL Agent Balanced 설정
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=profile=mysql-balanced,db-types=mysql,sampling-rate=0.1,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=WARN"
+        
+        # Spring Boot 프로파일 (MySQL)
+        - name: SPRING_PROFILES_ACTIVE
+          value: "mysql,balanced"
+        
+        # MySQL 연결 설정 (동일)
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:mysql://mysql-cluster-rw.mysql-system:3306/university?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
+        - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+          value: "com.mysql.cj.jdbc.Driver"
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: mysql-app-credentials
+              key: username
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-app-credentials
+              key: password
+        
+        # JPA/Hibernate MySQL 설정
+        - name: SPRING_JPA_DATABASE_PLATFORM
+          value: "org.hibernate.dialect.MySQLDialect"
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "none"
+        - name: SPRING_JPA_SHOW_SQL
+          value: "false"
+        
+        # HikariCP MySQL 균형잡힌 설정
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "10"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "3"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TEST_QUERY
+          value: "SELECT 1"
+        
+        # 로깅 (Balanced)
+        - name: LOGGING_LEVEL_ROOT
+          value: "INFO"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "INFO"
+        
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "384Mi"
+            cpu: "150m"
+          limits:
+            memory: "768Mi"
+            cpu: "350m"
+      
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+# MySQL App Credentials Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-app-credentials
+  namespace: kubedb-monitor-mysql
+type: Opaque
+stringData:
+  username: "mysql-app"
+  password: "mysqlapp123!"
+
+---
+# Services for MySQL Apps
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-mysql-conservative-service
+  namespace: kubedb-monitor-mysql
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8091
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-mysql-conservative
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-mysql-balanced-service
+  namespace: kubedb-monitor-mysql
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8092
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-mysql-balanced

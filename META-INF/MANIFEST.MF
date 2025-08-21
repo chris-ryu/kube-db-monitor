@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Created-By: Maven JAR Plugin 3.4.1
+Build-Jdk-Spec: 23
+Agent-Class: io.kubedb.monitor.agent.KubeDBAgent
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+Can-Set-Native-Method-Prefix: false
+Premain-Class: io.kubedb.monitor.agent.KubeDBAgent
+

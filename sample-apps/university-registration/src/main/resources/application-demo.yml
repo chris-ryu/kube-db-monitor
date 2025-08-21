@@ -1,0 +1,55 @@
+# 데모 환경 설정
+spring:
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: create-drop  # 데모용 - 재시작시마다 초기화
+    show-sql: false  # 데모에서는 SQL 로그 비활성화
+    properties:
+      hibernate:
+        format_sql: false
+        connection:
+          provider_disables_autocommit: false
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      auto-commit: false
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 20000
+      leak-detection-threshold: 60000
+
+# 애플리케이션 설정 - 데모 모드
+app:
+  registration:
+    data-init-mode: demo  # 데모용 현실적인 데이터
+    data-reset-enabled: true  # 데모용 데이터 리셋 허용
+    initialize-sample-data: true  # 구 설정 호환
+
+# 로깅 설정 - 데모용
+logging:
+  level:
+    root: INFO
+    com.university.registration: INFO
+    org.hibernate.SQL: WARN
+    org.springframework.web: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%logger{36}] - %msg%n"
+
+# 데모용 특별 설정
+demo:
+  features:
+    data-reset-api: true  # 데모 중 데이터 리셋 API 활성화
+    monitoring-enhanced: true  # 모니터링 강화
+    debug-endpoints: true  # 디버그 엔드포인트 활성화
+    
+# 모니터링 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,data-reset
+  endpoint:
+    health:
+      show-details: always

@@ -36,8 +36,15 @@ public class CartController {
             return ResponseEntity.ok(cartSummary);
 
         } catch (RuntimeException e) {
-            logger.warn("Student not found: {}", studentId);
-            return ResponseEntity.notFound().build();
+            logger.warn("Student not found, returning empty cart: {}", studentId);
+            // 빈 장바구니 반환
+            CartDTO.CartSummaryDTO emptyCart = new CartDTO.CartSummaryDTO();
+            emptyCart.setCartItems(List.of());
+            emptyCart.setTotalItems(0);
+            emptyCart.setTotalCredits(0);
+            emptyCart.setTimeConflicts(List.of());
+            emptyCart.setCanEnrollAll(true);
+            return ResponseEntity.ok(emptyCart);
 
         } catch (Exception e) {
             logger.error("Failed to get cart for student {}: {}", studentId, e.getMessage());

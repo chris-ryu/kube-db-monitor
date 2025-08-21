@@ -4,9 +4,9 @@ spring:
   
   # Database Configuration
   datasource:
-    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/app
+    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university
     driver-class-name: org.postgresql.Driver
-    username: app
+    username: postgres
     password: PYJihsj3M34zNmYuMcdoWo1Ltyf1NyrdMARrYkRygbeqAfW9dgG0xcHm9j9Y6BTk
     hikari:
       maximum-pool-size: 20
@@ -31,6 +31,10 @@ spring:
           batch_size: 20
         order_inserts: true
         order_updates: true
+        # PostgreSQL 호환성 개선 설정
+        use_sql_comments: true
+        jdbc.use_get_generated_keys: true
+        temp.use_jdbc_metadata_defaults: false
         
   # Cache Configuration
   cache:
@@ -47,7 +51,7 @@ spring:
 server:
   port: 8080
   servlet:
-    context-path: /
+    context-path: /api
     
 # Management Endpoints
 management:
@@ -160,9 +164,9 @@ spring:
       on-profile: kubernetes
       
   datasource:
-    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/app
+    url: jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university
     driver-class-name: org.postgresql.Driver
-    username: app
+    username: postgres
     password: PYJihsj3M34zNmYuMcdoWo1Ltyf1NyrdMARrYkRygbeqAfW9dgG0xcHm9j9Y6BTk
     hikari:
       maximum-pool-size: 30

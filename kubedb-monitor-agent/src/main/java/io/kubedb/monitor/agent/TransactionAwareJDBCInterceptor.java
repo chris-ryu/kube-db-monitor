@@ -212,6 +212,20 @@ public class TransactionAwareJDBCInterceptor {
     }
     
     /**
+     * Called when transaction commit is completed (proxy에서 사용)
+     */
+    public void onTransactionCommit(Connection connection) throws SQLException {
+        onCommit(connection);
+    }
+    
+    /**
+     * Called when transaction rollback is completed (proxy에서 사용)  
+     */
+    public void onTransactionRollback(Connection connection) throws SQLException {
+        onRollback(connection);
+    }
+    
+    /**
      * Analyze SQL to detect lock requests and acquisitions
      */
     private void analyzeLockBehavior(String transactionId, String sql) {

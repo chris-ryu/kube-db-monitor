@@ -1,0 +1,528 @@
+# Oracle Database 23c Free for KubeDB Monitor Agent Testing
+# Oracle 23c Free Edition 컨테이너 기반 구성
+
+---
+# Oracle Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oracle-system
+  labels:
+    name: oracle-system
+    database: oracle
+
+---
+# Oracle Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oracle-secrets
+  namespace: oracle-system
+type: Opaque
+stringData:
+  oracle-pwd: "OraclePassword123!"
+  pdb-pwd: "PDBPassword123!"
+  app-user: "oracle_app"
+  app-pwd: "OracleApp123!"
+
+---
+# Oracle ConfigMap for initialization
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oracle-init-scripts
+  namespace: oracle-system
+data:
+  01-setup.sql: |
+    -- Oracle University Database Setup
+    -- CDB (Container Database) 및 PDB (Pluggable Database) 설정
+    
+    -- PDB 연결
+    ALTER SESSION SET CONTAINER = FREEPDB1;
+    
+    -- University 사용자 생성
+    CREATE USER university IDENTIFIED BY "UniversityDB123!"
+    DEFAULT TABLESPACE USERS
+    TEMPORARY TABLESPACE TEMP;
+    
+    -- 권한 부여
+    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE VIEW, CREATE PROCEDURE TO university;
+    GRANT UNLIMITED TABLESPACE TO university;
+    
+    -- Application 사용자 생성 (KubeDB Monitor Agent 테스트용)
+    CREATE USER oracle_app IDENTIFIED BY "OracleApp123!"
+    DEFAULT TABLESPACE USERS
+    TEMPORARY TABLESPACE TEMP;
+    
+    GRANT CONNECT, RESOURCE TO oracle_app;
+    GRANT CREATE SESSION TO oracle_app;
+    GRANT SELECT ANY TABLE TO oracle_app;
+    GRANT INSERT ANY TABLE TO oracle_app;
+    GRANT UPDATE ANY TABLE TO oracle_app;
+    GRANT DELETE ANY TABLE TO oracle_app;
+    
+    -- University 스키마 생성을 위한 연결
+    CONNECT university/"UniversityDB123!"@//localhost:1521/FREEPDB1;
+
+  02-create-schema.sql: |
+    -- Oracle University Database Schema
+    -- Oracle 특화 기능을 활용한 테이블 생성
+    
+    -- 시퀀스 생성 (Oracle 전용)
+    CREATE SEQUENCE dept_seq START WITH 1 INCREMENT BY 1;
+    CREATE SEQUENCE semester_seq START WITH 1 INCREMENT BY 1;
+    CREATE SEQUENCE enrollment_seq START WITH 1 INCREMENT BY 1;
+    CREATE SEQUENCE cart_seq START WITH 1 INCREMENT BY 1;
+    
+    -- Departments table (Oracle optimized)
+    CREATE TABLE departments (
+        department_id NUMBER PRIMARY KEY,
+        name VARCHAR2(100) NOT NULL,
+        code VARCHAR2(10) NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- 트리거로 자동 증가 구현
+    CREATE OR REPLACE TRIGGER dept_trigger
+        BEFORE INSERT ON departments
+        FOR EACH ROW
+    BEGIN
+        :NEW.department_id := dept_seq.NEXTVAL;
+    END;
+    /
+    
+    -- Semesters table
+    CREATE TABLE semesters (
+        semester_id NUMBER PRIMARY KEY,
+        year NUMBER(4) NOT NULL,
+        season VARCHAR2(10) NOT NULL CHECK (season IN ('SPRING', 'SUMMER', 'FALL', 'WINTER')),
+        is_current NUMBER(1) DEFAULT 0 CHECK (is_current IN (0, 1)),
+        registration_start TIMESTAMP,
+        registration_end TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_year_season UNIQUE (year, season)
+    );
+    
+    CREATE OR REPLACE TRIGGER semester_trigger
+        BEFORE INSERT ON semesters
+        FOR EACH ROW
+    BEGIN
+        :NEW.semester_id := semester_seq.NEXTVAL;
+    END;
+    /
+    
+    -- Students table
+    CREATE TABLE students (
+        student_id VARCHAR2(20) PRIMARY KEY,
+        name VARCHAR2(100) NOT NULL,
+        email VARCHAR2(100) UNIQUE,
+        department_id NUMBER,
+        year NUMBER(1),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT fk_student_dept FOREIGN KEY (department_id) REFERENCES departments(department_id)
+    );
+    
+    -- Oracle Text Index 생성 (Full-text search)
+    -- CREATE INDEX idx_student_name_text ON students (name) INDEXTYPE IS CTXSYS.CONTEXT;
+    
+    -- Courses table (Oracle specific features)
+    CREATE TABLE courses (
+        course_id VARCHAR2(10) PRIMARY KEY,
+        course_name VARCHAR2(100) NOT NULL,
+        professor VARCHAR2(50) NOT NULL,
+        credits NUMBER(1) NOT NULL,
+        capacity NUMBER NOT NULL,
+        enrolled_count NUMBER DEFAULT 0,
+        department_id NUMBER NOT NULL,
+        semester_id NUMBER NOT NULL,
+        day_time VARCHAR2(20),
+        classroom VARCHAR2(20),
+        prerequisite_course_id VARCHAR2(10),
+        is_active NUMBER(1) DEFAULT 1 CHECK (is_active IN (0, 1)),
+        popularity_level VARCHAR2(10) DEFAULT 'MEDIUM' CHECK (popularity_level IN ('HIGH', 'MEDIUM', 'LOW')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        version NUMBER DEFAULT 0,
+        CONSTRAINT fk_course_dept FOREIGN KEY (department_id) REFERENCES departments(department_id),
+        CONSTRAINT fk_course_semester FOREIGN KEY (semester_id) REFERENCES semesters(semester_id),
+        CONSTRAINT fk_course_prereq FOREIGN KEY (prerequisite_course_id) REFERENCES courses(course_id)
+    );
+    
+    -- Oracle Bitmap Index (성능 최적화)
+    CREATE BITMAP INDEX idx_course_popularity ON courses (popularity_level);
+    CREATE BITMAP INDEX idx_course_active ON courses (is_active);
+    
+    -- Enrollments table
+    CREATE TABLE enrollments (
+        enrollment_id NUMBER PRIMARY KEY,
+        student_id VARCHAR2(20) NOT NULL,
+        course_id VARCHAR2(10) NOT NULL,
+        enrollment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR2(20) DEFAULT 'ENROLLED' CHECK (status IN ('ENROLLED', 'DROPPED', 'COMPLETED')),
+        grade VARCHAR2(5),
+        CONSTRAINT fk_enrollment_student FOREIGN KEY (student_id) REFERENCES students(student_id),
+        CONSTRAINT fk_enrollment_course FOREIGN KEY (course_id) REFERENCES courses(course_id),
+        CONSTRAINT unique_student_course UNIQUE (student_id, course_id)
+    );
+    
+    CREATE OR REPLACE TRIGGER enrollment_trigger
+        BEFORE INSERT ON enrollments
+        FOR EACH ROW
+    BEGIN
+        :NEW.enrollment_id := enrollment_seq.NEXTVAL;
+    END;
+    /
+    
+    -- Cart_items table
+    CREATE TABLE cart_items (
+        cart_id NUMBER PRIMARY KEY,
+        student_id VARCHAR2(20) NOT NULL,
+        course_id VARCHAR2(10) NOT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT fk_cart_student FOREIGN KEY (student_id) REFERENCES students(student_id),
+        CONSTRAINT fk_cart_course FOREIGN KEY (course_id) REFERENCES courses(course_id),
+        CONSTRAINT unique_cart_item UNIQUE (student_id, course_id)
+    );
+    
+    CREATE OR REPLACE TRIGGER cart_trigger
+        BEFORE INSERT ON cart_items
+        FOR EACH ROW
+    BEGIN
+        :NEW.cart_id := cart_seq.NEXTVAL;
+    END;
+    /
+
+  03-sample-data.sql: |
+    -- Oracle sample data insertion
+    
+    -- Departments
+    INSERT INTO departments (name, code) VALUES ('Oracle컴퓨터과학과', 'OCSE');
+    INSERT INTO departments (name, code) VALUES ('Oracle전자공학과', 'OEE');
+    INSERT INTO departments (name, code) VALUES ('Oracle기계공학과', 'OME');
+    INSERT INTO departments (name, code) VALUES ('Oracle경영학과', 'OBIZ');
+    INSERT INTO departments (name, code) VALUES ('Oracle수학과', 'OMATH');
+    
+    -- Current semester
+    INSERT INTO semesters (year, season, is_current, registration_start, registration_end) 
+    VALUES (2024, 'FALL', 1, 
+            TO_TIMESTAMP('2024-08-01 09:00:00', 'YYYY-MM-DD HH24:MI:SS'),
+            TO_TIMESTAMP('2024-08-31 18:00:00', 'YYYY-MM-DD HH24:MI:SS'));
+    
+    -- Sample students
+    INSERT INTO students (student_id, name, email, department_id, year) VALUES ('O2021001', '김Oracle', 'kim.oracle@example.com', 1, 3);
+    INSERT INTO students (student_id, name, email, department_id, year) VALUES ('O2021002', '이Oracle', 'lee.oracle@example.com', 1, 3);
+    INSERT INTO students (student_id, name, email, department_id, year) VALUES ('O2021003', '박Oracle', 'park.oracle@example.com', 2, 2);
+    INSERT INTO students (student_id, name, email, department_id, year) VALUES ('O2021004', '최Oracle', 'choi.oracle@example.com', 3, 4);
+    INSERT INTO students (student_id, name, email, department_id, year) VALUES ('O2021005', '정Oracle', 'jung.oracle@example.com', 4, 1);
+    INSERT INTO students (student_id, name, email, department_id, year) VALUES ('O2024001', 'Oracle테스트학생', 'oracle-test@example.com', 1, 1);
+    
+    -- Sample courses
+    INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level)
+    VALUES ('OCSE301', 'Oracle Database Administration', '김Oracle교수', 3, 40, 0, 1, 1, '월1,수3', 'ORA101', 1, 'HIGH');
+    
+    INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level)
+    VALUES ('OCSE302', 'Oracle PL/SQL Programming', '이Oracle교수', 3, 35, 0, 1, 1, '화2,목4', 'ORA102', 1, 'MEDIUM');
+    
+    INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level)
+    VALUES ('OCSE303', 'Oracle Performance Tuning', '박Oracle교수', 3, 30, 0, 1, 1, '월3,수1', 'ORA103', 1, 'HIGH');
+    
+    INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level)
+    VALUES ('OEE201', 'Oracle RAC & DataGuard', '최Oracle교수', 3, 25, 0, 2, 1, '화1,목3', 'ORA201', 1, 'MEDIUM');
+    
+    INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level)
+    VALUES ('OBIZ101', 'Oracle Business Intelligence', '한Oracle교수', 3, 50, 0, 4, 1, '화3,목1', 'ORA401', 1, 'HIGH');
+    
+    COMMIT;
+
+  04-procedures.sql: |
+    -- Oracle 특화 프로시저 및 패키지
+    
+    -- 패키지 스펙 정의
+    CREATE OR REPLACE PACKAGE university_pkg AS
+        -- 대용량 데이터 생성
+        PROCEDURE generate_test_data(p_num_students IN NUMBER, p_num_courses IN NUMBER);
+        
+        -- 슬로우 쿼리 생성
+        PROCEDURE create_slow_query(p_sleep_seconds IN NUMBER);
+        
+        -- Oracle 통계 수집
+        PROCEDURE collect_oracle_stats;
+        
+        -- 복잡한 분석 쿼리
+        FUNCTION get_department_stats RETURN SYS_REFCURSOR;
+    END university_pkg;
+    /
+    
+    -- 패키지 바디 구현
+    CREATE OR REPLACE PACKAGE BODY university_pkg AS
+        
+        PROCEDURE generate_test_data(p_num_students IN NUMBER, p_num_courses IN NUMBER) AS
+            v_dept_id NUMBER;
+        BEGIN
+            -- 대량 학생 데이터 생성
+            FOR i IN 1..p_num_students LOOP
+                v_dept_id := MOD(i, 5) + 1;
+                
+                BEGIN
+                    INSERT INTO students (student_id, name, email, department_id, year)
+                    VALUES ('OTEST' || LPAD(i, 6, '0'),
+                            'Oracle테스트학생' || i,
+                            'oracle-test' || i || '@example.com',
+                            v_dept_id,
+                            MOD(i, 4) + 1);
+                EXCEPTION
+                    WHEN DUP_VAL_ON_INDEX THEN
+                        NULL; -- 중복 무시
+                END;
+            END LOOP;
+            
+            -- 대량 과목 데이터 생성
+            FOR i IN 1..p_num_courses LOOP
+                BEGIN
+                    INSERT INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count,
+                                       department_id, semester_id, day_time, classroom, is_active, popularity_level)
+                    VALUES ('OTEST' || LPAD(i, 3, '0'),
+                            'Oracle테스트과목' || i,
+                            'Oracle테스트교수' || i,
+                            3, 50, 0,
+                            MOD(i, 5) + 1, 1,
+                            '월' || MOD(i, 5) + 1,
+                            'ORA-TEST' || LPAD(i, 3, '0'),
+                            1,
+                            CASE MOD(i, 3)
+                                WHEN 0 THEN 'HIGH'
+                                WHEN 1 THEN 'MEDIUM'
+                                ELSE 'LOW'
+                            END);
+                EXCEPTION
+                    WHEN DUP_VAL_ON_INDEX THEN
+                        NULL; -- 중복 무시
+                END;
+            END LOOP;
+            
+            COMMIT;
+            
+            DBMS_OUTPUT.PUT_LINE('Oracle 테스트 데이터 생성 완료: 학생 ' || p_num_students || '명, 과목 ' || p_num_courses || '개');
+        END generate_test_data;
+        
+        PROCEDURE create_slow_query(p_sleep_seconds IN NUMBER) AS
+            v_result NUMBER;
+        BEGIN
+            -- Oracle DBMS_LOCK.SLEEP 사용
+            DBMS_LOCK.SLEEP(p_sleep_seconds);
+            
+            -- 복잡한 분석 쿼리 (Oracle 최적화 테스트)
+            SELECT COUNT(*)
+            INTO v_result
+            FROM (
+                SELECT s.student_id,
+                       s.name,
+                       d.name AS dept_name,
+                       COUNT(c.course_id) AS course_count,
+                       LISTAGG(c.course_name, ', ') WITHIN GROUP (ORDER BY c.course_name) AS course_list
+                FROM students s
+                LEFT JOIN departments d ON s.department_id = d.department_id
+                LEFT JOIN enrollments e ON s.student_id = e.student_id
+                LEFT JOIN courses c ON e.course_id = c.course_id
+                WHERE s.student_id LIKE 'OTEST%'
+                GROUP BY s.student_id, s.name, d.name
+                ORDER BY course_count DESC
+            );
+            
+            DBMS_OUTPUT.PUT_LINE('Oracle 슬로우 쿼리 완료. 결과: ' || v_result);
+        END create_slow_query;
+        
+        PROCEDURE collect_oracle_stats AS
+        BEGIN
+            -- 테이블 통계 수집
+            DBMS_STATS.GATHER_TABLE_STATS(USER, 'DEPARTMENTS');
+            DBMS_STATS.GATHER_TABLE_STATS(USER, 'SEMESTERS');
+            DBMS_STATS.GATHER_TABLE_STATS(USER, 'STUDENTS');
+            DBMS_STATS.GATHER_TABLE_STATS(USER, 'COURSES');
+            DBMS_STATS.GATHER_TABLE_STATS(USER, 'ENROLLMENTS');
+            DBMS_STATS.GATHER_TABLE_STATS(USER, 'CART_ITEMS');
+            
+            DBMS_OUTPUT.PUT_LINE('Oracle 통계 수집 완료');
+        END collect_oracle_stats;
+        
+        FUNCTION get_department_stats RETURN SYS_REFCURSOR AS
+            v_cursor SYS_REFCURSOR;
+        BEGIN
+            OPEN v_cursor FOR
+                SELECT d.name AS department_name,
+                       COUNT(DISTINCT s.student_id) AS student_count,
+                       COUNT(DISTINCT c.course_id) AS course_count,
+                       AVG(c.enrolled_count) AS avg_enrolled
+                FROM departments d
+                LEFT JOIN students s ON d.department_id = s.department_id
+                LEFT JOIN courses c ON d.department_id = c.department_id
+                GROUP BY d.department_id, d.name
+                ORDER BY student_count DESC;
+            
+            RETURN v_cursor;
+        END get_department_stats;
+        
+    END university_pkg;
+    /
+    
+    -- 초기 테스트 데이터 생성
+    BEGIN
+        university_pkg.generate_test_data(30, 10);
+        university_pkg.collect_oracle_stats;
+    END;
+    /
+    
+    -- Oracle_app 사용자에게 권한 부여
+    GRANT EXECUTE ON university_pkg TO oracle_app;
+    GRANT SELECT ON departments TO oracle_app;
+    GRANT SELECT ON semesters TO oracle_app;
+    GRANT SELECT ON students TO oracle_app;
+    GRANT SELECT ON courses TO oracle_app;
+    GRANT SELECT ON enrollments TO oracle_app;
+    GRANT SELECT ON cart_items TO oracle_app;
+    
+    COMMIT;
+
+---
+# Oracle StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oracle-cluster
+  namespace: oracle-system
+  labels:
+    app: oracle-cluster
+spec:
+  serviceName: oracle-cluster-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oracle-cluster
+  template:
+    metadata:
+      labels:
+        app: oracle-cluster
+    spec:
+      containers:
+      - name: oracle
+        image: container-registry.oracle.com/database/free:23.5.0.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: ORACLE_PWD
+          valueFrom:
+            secretKeyRef:
+              name: oracle-secrets
+              key: oracle-pwd
+        - name: ORACLE_PDB
+          value: "FREEPDB1"
+        - name: ORACLE_CHARACTERSET
+          value: "AL32UTF8"
+        - name: ORACLE_EDITION
+          value: "free"
+        ports:
+        - containerPort: 1521
+          name: oracle
+        - containerPort: 5500
+          name: oracle-em
+        volumeMounts:
+        - name: oracle-data
+          mountPath: /opt/oracle/oradata
+        - name: oracle-init-scripts
+          mountPath: /opt/oracle/scripts/setup
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "SELECT 1 FROM DUAL;" | sqlplus -s system/$ORACLE_PWD@//localhost:1521/FREE
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "SELECT 1 FROM DUAL;" | sqlplus -s system/$ORACLE_PWD@//localhost:1521/FREEPDB1
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      
+      # Oracle 초기화를 위한 대기 시간
+      initContainers:
+      - name: oracle-init-wait
+        image: busybox:1.35
+        command: ['sh', '-c', 'echo "Oracle initialization starting..." && sleep 10']
+      
+      volumes:
+      - name: oracle-init-scripts
+        configMap:
+          name: oracle-init-scripts
+          defaultMode: 0755
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: oracle-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+
+---
+# Oracle Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: oracle-cluster-headless
+  namespace: oracle-system
+  labels:
+    app: oracle-cluster
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 1521
+    targetPort: 1521
+    protocol: TCP
+    name: oracle
+  - port: 5500
+    targetPort: 5500
+    protocol: TCP
+    name: oracle-em
+  selector:
+    app: oracle-cluster
+
+---
+# Oracle Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: oracle-cluster-rw
+  namespace: oracle-system
+  labels:
+    app: oracle-cluster
+    service-type: read-write
+spec:
+  type: ClusterIP
+  ports:
+  - port: 1521
+    targetPort: 1521
+    protocol: TCP
+    name: oracle
+  - port: 5500
+    targetPort: 5500
+    protocol: TCP
+    name: oracle-em
+  selector:
+    app: oracle-cluster

@@ -1,0 +1,378 @@
+# PostgreSQL Agent 호환성 테스트용 배포 설정
+# 3가지 Agent 프로파일(Conservative/Balanced/Aggressive) 동시 테스트
+
+---
+# Conservative Mode 테스트 배포
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-conservative
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-conservative
+    agent-profile: conservative
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-conservative
+  template:
+    metadata:
+      labels:
+        app: university-registration-conservative
+        agent-profile: conservative
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/profile: "conservative"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["/bin/sh", "-c"]
+        args: 
+        - |
+          echo "Copying KubeDB Monitor Agent (Conservative Mode)..."
+          cp /opt/kubedb-agent/kubedb-monitor-agent.jar /opt/shared-agent/kubedb-monitor-agent.jar
+          echo "Agent copied successfully"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/shared-agent
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Agent Conservative 설정 (안전 모드)
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=profile=conservative,db-types=postgresql,sampling-rate=0.01,slow-query-threshold=500,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=ERROR,safe-transformation-mode=true,hibernate-compatibility-mode=true,spring-boot-compatibility=true"
+        
+        # Spring Boot 프로파일  
+        - name: SPRING_PROFILES_ACTIVE
+          value: "conservative"
+        
+        # PostgreSQL 연결 설정
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university?stringtype=unspecified"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "univ-app"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: "qlcrkfka1#"
+        
+        # HikariCP 보수적 설정
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "5"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "1"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        - name: SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT
+          value: "600000"
+        - name: SPRING_DATASOURCE_HIKARI_MAX_LIFETIME
+          value: "1800000"
+        
+        # 로깅 (Conservative)
+        - name: LOGGING_LEVEL_ROOT
+          value: "WARN"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "WARN"
+        
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+      
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+# Balanced Mode 테스트 배포
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-balanced
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-balanced
+    agent-profile: balanced
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-balanced
+  template:
+    metadata:
+      labels:
+        app: university-registration-balanced
+        agent-profile: balanced
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/profile: "balanced"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["/bin/sh", "-c"]
+        args: 
+        - |
+          echo "Copying KubeDB Monitor Agent (Balanced Mode)..."
+          cp /opt/kubedb-agent/kubedb-monitor-agent.jar /opt/shared-agent/kubedb-monitor-agent.jar
+          echo "Agent copied successfully"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/shared-agent
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Agent Balanced 설정 (PostgreSQL JDBC 호환성 개선)
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=profile=balanced,db-types=postgresql,sampling-rate=0.1,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=WARN,safe-transformation-mode=true,postgresql-strict-compatibility=true,exclude-prepared-statement-transformation=true,preserve-transaction-boundaries=true"
+        
+        # Spring Boot 프로파일
+        - name: SPRING_PROFILES_ACTIVE
+          value: "balanced"
+        
+        # PostgreSQL 연결 설정
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university?stringtype=unspecified"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "univ-app"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: "qlcrkfka1#"
+        
+        # HikariCP 균형잡힌 설정
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "10"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "2"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        - name: SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT
+          value: "600000"
+        - name: SPRING_DATASOURCE_HIKARI_MAX_LIFETIME
+          value: "1800000"
+        - name: SPRING_DATASOURCE_HIKARI_AUTO_COMMIT
+          value: "true"
+        
+        # 트랜잭션 관리 설정
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_CONNECTION_AUTOCOMMIT
+          value: "true"
+        - name: SPRING_TRANSACTION_DEFAULT_TIMEOUT
+          value: "30"
+        
+        # 로깅 (Balanced)
+        - name: LOGGING_LEVEL_ROOT
+          value: "INFO"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "INFO"
+        
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "384Mi"
+            cpu: "150m"
+          limits:
+            memory: "768Mi"
+            cpu: "350m"
+      
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+# Aggressive Mode 테스트 배포
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-aggressive
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-aggressive
+    agent-profile: aggressive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-aggressive
+  template:
+    metadata:
+      labels:
+        app: university-registration-aggressive
+        agent-profile: aggressive
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/profile: "aggressive"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["/bin/sh", "-c"]
+        args: 
+        - |
+          echo "Copying KubeDB Monitor Agent (Aggressive Mode)..."
+          cp /opt/kubedb-agent/kubedb-monitor-agent.jar /opt/shared-agent/kubedb-monitor-agent.jar
+          echo "Agent copied successfully"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/shared-agent
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Agent Aggressive 설정
+        - name: JAVA_OPTS
+          value: "-Xmx1g -Xms512m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=profile=aggressive,db-types=postgresql,sampling-rate=0.5,slow-query-threshold=50,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=DEBUG"
+        
+        # Spring Boot 프로파일
+        - name: SPRING_PROFILES_ACTIVE
+          value: "aggressive"
+        
+        # PostgreSQL 연결 설정
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university?stringtype=unspecified"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "univ-app"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: "qlcrkfka1#"
+        
+        # HikariCP 적극적 설정
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "20"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "5"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        - name: SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT
+          value: "300000"
+        - name: SPRING_DATASOURCE_HIKARI_MAX_LIFETIME
+          value: "900000"
+        
+        # 로깅 (Aggressive - 상세)
+        - name: LOGGING_LEVEL_ROOT
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_JDBC
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_COM_ZAXXER_HIKARI
+          value: "DEBUG"
+        
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+# Service 설정들
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-conservative-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-conservative
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8081
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-conservative
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-balanced-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-balanced
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8082
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-balanced
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-aggressive-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-aggressive
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8083
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-aggressive

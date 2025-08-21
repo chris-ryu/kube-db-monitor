@@ -2,6 +2,7 @@ package com.university.registration.controller;
 
 import com.university.registration.dto.EnrollmentRequestDTO;
 import com.university.registration.dto.EnrollmentResponseDTO;
+import com.university.registration.dto.EnrollmentDTO;
 import com.university.registration.entity.Enrollment;
 import com.university.registration.service.EnrollmentService;
 import org.slf4j.Logger;
@@ -150,14 +151,19 @@ public class EnrollmentController {
      * GET /api/enrollments/me?studentId=2021001
      */
     @GetMapping("/me")
-    public ResponseEntity<List<Enrollment>> getMyEnrollments(@RequestParam String studentId) {
+    public ResponseEntity<List<EnrollmentDTO>> getMyEnrollments(@RequestParam String studentId) {
         logger.info("Getting enrollments for student: {}", studentId);
 
         try {
             List<Enrollment> enrollments = enrollmentService.getStudentEnrollments(studentId);
+            
+            // Entity를 DTO로 변환하여 순환 참조 방지
+            List<EnrollmentDTO> enrollmentDTOs = enrollments.stream()
+                    .map(EnrollmentDTO::new)
+                    .toList();
 
-            logger.debug("Found {} enrollments for student {}", enrollments.size(), studentId);
-            return ResponseEntity.ok(enrollments);
+            logger.debug("Found {} enrollments for student {}", enrollmentDTOs.size(), studentId);
+            return ResponseEntity.ok(enrollmentDTOs);
 
         } catch (RuntimeException e) {
             logger.warn("Student not found: {}", studentId);

@@ -43,7 +43,7 @@ public class CourseService {
                     departmentId, keyword, page, size);
 
         Semester currentSemester = getCurrentSemester();
-        Pageable pageable = PageRequest.of(page, size, Sort.by("courseId"));
+        Pageable pageable = PageRequest.of(page, size, Sort.unsorted());
 
         // Long Running Transaction 시뮬레이션을 위한 랜덤 sleep (30% 확률로 7-12초)
         // sleep을 실제 SQL 실행 전에 배치하여 SQL 실행시간이 증가하도록 함
@@ -59,7 +59,7 @@ public class CourseService {
 
         // 복잡한 검색 쿼리 실행 - JOIN with WHERE conditions (sleep 후 실행)
         Page<Course> coursePage = courseRepository.searchCourses(
-            currentSemester, departmentId, keyword, pageable);
+            currentSemester.getId(), departmentId, keyword, pageable);
 
         // Entity를 DTO로 변환
         return coursePage.map(CourseDTO::new);

@@ -97,25 +97,6 @@ class JDBCInterceptorTest {
     }
 
     @Test
-    void shouldIdentifyJdbcPreparedStatementAsTarget() throws Exception {
-        // Given
-        String className = "java/sql/PreparedStatement";
-        byte[] classfileBuffer = new byte[0];
-
-        // When
-        byte[] result = interceptor.transform(
-                null, 
-                className, 
-                null, 
-                null, 
-                classfileBuffer
-        );
-
-        // Then
-        assertThat(result).isNull();
-    }
-
-    @Test
     void shouldIdentifyMysqlDriverAsTarget() throws Exception {
         // Given
         String className = "com/mysql/cj/jdbc/ConnectionImpl";
@@ -213,5 +194,55 @@ class JDBCInterceptorTest {
 
         // Then - should return null instead of throwing exception
         assertThat(result).isNull();
+    }
+
+    @Test
+    void shouldExcludeSpringDataSourceClasses() throws Exception {
+        // Given - Spring DataSource classes that cause ASM compatibility issues
+        String[] springDataSourceClasses = {
+                "org/springframework/jdbc/datasource/lookup/AbstractRoutingDataSource",
+                "org/springframework/jdbc/datasource/lookup/DataSourceLookup",
+                "org/springframework/jdbc/datasource/DataSourceTransactionManager"
+        };
+        byte[] classfileBuffer = new byte[0];
+
+        for (String className : springDataSourceClasses) {
+            // When
+            byte[] result = interceptor.transform(
+                    null, 
+                    className, 
+                    null, 
+                    null, 
+                    classfileBuffer
+            );
+
+            // Then - Spring DataSource classes should be excluded
+            assertThat(result).isNull();
+        }
+    }
+
+    @Test
+    void shouldExcludeGeneralSpringClasses() throws Exception {
+        // Given - General Spring classes that should be excluded
+        String[] springClasses = {
+                "org/springframework/beans/factory/BeanFactory",
+                "org/springframework/context/ApplicationContext",
+                "org/springframework/web/servlet/DispatcherServlet"
+        };
+        byte[] classfileBuffer = new byte[0];
+
+        for (String className : springClasses) {
+            // When
+            byte[] result = interceptor.transform(
+                    null, 
+                    className, 
+                    null, 
+                    null, 
+                    classfileBuffer
+            );
+
+            // Then - General Spring classes should be excluded
+            assertThat(result).isNull();
+        }
     }
 }

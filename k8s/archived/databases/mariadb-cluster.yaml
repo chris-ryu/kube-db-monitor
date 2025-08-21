@@ -1,0 +1,546 @@
+# MariaDB Cluster for KubeDB Monitor Agent Testing
+# MariaDB 11.0 클러스터 구성 (MySQL 호환성 테스트 포함)
+
+---
+# MariaDB Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mariadb-system
+  labels:
+    name: mariadb-system
+    database: mariadb
+
+---
+# MariaDB Root Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mariadb-root-secret
+  namespace: mariadb-system
+type: Opaque
+stringData:
+  root-password: "mariadbrootpass123!"
+
+---
+# MariaDB Application User Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mariadb-app-secret
+  namespace: mariadb-system
+type: Opaque
+stringData:
+  username: "mariadb-app"
+  password: "mariadbapp123!"
+
+---
+# MariaDB Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mariadb-config
+  namespace: mariadb-system
+data:
+  my.cnf: |
+    [mariadb]
+    # MariaDB specific settings
+    bind-address = 0.0.0.0
+    port = 3306
+    
+    # Character set
+    character-set-server = utf8mb4
+    collation-server = utf8mb4_unicode_ci
+    
+    # InnoDB settings (MariaDB optimized)
+    innodb_buffer_pool_size = 256M
+    innodb_log_file_size = 64M
+    innodb_flush_log_at_trx_commit = 2
+    innodb_flush_method = O_DIRECT
+    innodb_file_per_table = 1
+    
+    # MariaDB specific optimizations
+    thread_cache_size = 16
+    table_open_cache = 2048
+    table_definition_cache = 1024
+    
+    # Query cache (MariaDB maintains better query cache)
+    query_cache_type = 1
+    query_cache_size = 32M
+    query_cache_limit = 1M
+    
+    # Logging for KubeDB Monitor testing
+    general_log = 1
+    general_log_file = /var/log/mysql/general.log
+    slow_query_log = 1
+    slow_query_log_file = /var/log/mysql/slow.log
+    long_query_time = 0.1
+    log_queries_not_using_indexes = 1
+    
+    # Connection settings
+    max_connections = 200
+    max_connect_errors = 10000
+    connect_timeout = 60
+    wait_timeout = 28800
+    
+    # Binary logging (MariaDB enhanced)
+    log-bin = mariadb-bin
+    binlog_format = ROW
+    expire_logs_days = 7
+    max_binlog_size = 100M
+    
+    # MariaDB specific features
+    plugin_load_add = query_response_time
+    query_response_time_stats = ON
+    
+    # Performance schema
+    performance_schema = ON
+    performance_schema_consumer_events_statements_current = ON
+    performance_schema_consumer_events_statements_history = ON
+    
+    # SQL mode (MariaDB compatible)
+    sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+
+---
+# MariaDB StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb-cluster
+  namespace: mariadb-system
+  labels:
+    app: mariadb-cluster
+spec:
+  serviceName: mariadb-cluster-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb-cluster
+  template:
+    metadata:
+      labels:
+        app: mariadb-cluster
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:11.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-root-secret
+              key: root-password
+        - name: MARIADB_DATABASE
+          value: "university"
+        - name: MARIADB_USER
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-app-secret
+              key: username
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-app-secret
+              key: password
+        - name: MARIADB_AUTO_UPGRADE
+          value: "1"
+        ports:
+        - containerPort: 3306
+          name: mariadb
+        volumeMounts:
+        - name: mariadb-data
+          mountPath: /var/lib/mysql
+        - name: mariadb-config
+          mountPath: /etc/mysql/conf.d/my.cnf
+          subPath: my.cnf
+        - name: mariadb-logs
+          mountPath: /var/log/mysql
+        - name: mariadb-init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+        livenessProbe:
+          exec:
+            command:
+            - mariadb-admin
+            - ping
+            - -h
+            - localhost
+            - -u
+            - root
+            - -p$(MARIADB_ROOT_PASSWORD)
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - mariadb
+            - -h
+            - localhost
+            - -u
+            - root
+            - -p$(MARIADB_ROOT_PASSWORD)
+            - -e
+            - "SELECT 1"
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      
+      volumes:
+      - name: mariadb-config
+        configMap:
+          name: mariadb-config
+      - name: mariadb-logs
+        emptyDir: {}
+      - name: mariadb-init-scripts
+        configMap:
+          name: mariadb-init-scripts
+          defaultMode: 0755
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: mariadb-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+# MariaDB Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-cluster-headless
+  namespace: mariadb-system
+  labels:
+    app: mariadb-cluster
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 3306
+    targetPort: 3306
+    protocol: TCP
+    name: mariadb
+  selector:
+    app: mariadb-cluster
+
+---
+# MariaDB Read-Write Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-cluster-rw
+  namespace: mariadb-system
+  labels:
+    app: mariadb-cluster
+    service-type: read-write
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3306
+    targetPort: 3306
+    protocol: TCP
+    name: mariadb
+  selector:
+    app: mariadb-cluster
+
+---
+# MariaDB 초기화 스크립트 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mariadb-init-scripts
+  namespace: mariadb-system
+data:
+  01-create-university-schema.sql: |
+    -- MariaDB University Database Schema for KubeDB Monitor Testing
+    USE university;
+    
+    -- Create departments table (MariaDB specific optimizations)
+    CREATE TABLE IF NOT EXISTS departments (
+        department_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        code VARCHAR(10) NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_dept_code (code),
+        INDEX idx_dept_name (name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+    
+    -- Create semesters table
+    CREATE TABLE IF NOT EXISTS semesters (
+        semester_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        year INT NOT NULL,
+        season ENUM('SPRING', 'SUMMER', 'FALL', 'WINTER') NOT NULL,
+        is_current BOOLEAN DEFAULT FALSE,
+        registration_start TIMESTAMP NULL,
+        registration_end TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_year_season (year, season),
+        INDEX idx_current_semester (is_current)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create students table
+    CREATE TABLE IF NOT EXISTS students (
+        student_id VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) UNIQUE,
+        department_id BIGINT,
+        year INT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (department_id) REFERENCES departments(department_id) ON DELETE SET NULL,
+        INDEX idx_student_dept (department_id),
+        INDEX idx_student_year (year),
+        FULLTEXT KEY ft_student_name (name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create courses table (MariaDB optimized with additional indexes)
+    CREATE TABLE IF NOT EXISTS courses (
+        course_id VARCHAR(10) PRIMARY KEY,
+        course_name VARCHAR(100) NOT NULL,
+        professor VARCHAR(50) NOT NULL,
+        credits INT NOT NULL DEFAULT 3,
+        capacity INT NOT NULL DEFAULT 30,
+        enrolled_count INT DEFAULT 0,
+        department_id BIGINT NOT NULL,
+        semester_id BIGINT NOT NULL,
+        day_time VARCHAR(20),
+        classroom VARCHAR(20),
+        prerequisite_course_id VARCHAR(10),
+        is_active BOOLEAN DEFAULT TRUE,
+        popularity_level ENUM('HIGH', 'MEDIUM', 'LOW') DEFAULT 'MEDIUM',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        version BIGINT DEFAULT 0,
+        FOREIGN KEY (department_id) REFERENCES departments(department_id) ON DELETE CASCADE,
+        FOREIGN KEY (semester_id) REFERENCES semesters(semester_id) ON DELETE CASCADE,
+        FOREIGN KEY (prerequisite_course_id) REFERENCES courses(course_id) ON DELETE SET NULL,
+        INDEX idx_course_department (department_id),
+        INDEX idx_course_semester (semester_id),
+        INDEX idx_course_popularity (popularity_level),
+        INDEX idx_course_active (is_active),
+        INDEX idx_course_professor (professor),
+        FULLTEXT KEY ft_course_name (course_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+    
+    -- Create enrollments table
+    CREATE TABLE IF NOT EXISTS enrollments (
+        enrollment_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        student_id VARCHAR(20) NOT NULL,
+        course_id VARCHAR(10) NOT NULL,
+        enrollment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status ENUM('ENROLLED', 'DROPPED', 'COMPLETED') DEFAULT 'ENROLLED',
+        grade VARCHAR(5),
+        FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
+        FOREIGN KEY (course_id) REFERENCES courses(course_id) ON DELETE CASCADE,
+        UNIQUE KEY unique_student_course (student_id, course_id),
+        INDEX idx_enrollment_status (status),
+        INDEX idx_enrollment_date (enrollment_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- Create cart_items table
+    CREATE TABLE IF NOT EXISTS cart_items (
+        cart_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        student_id VARCHAR(20) NOT NULL,
+        course_id VARCHAR(10) NOT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
+        FOREIGN KEY (course_id) REFERENCES courses(course_id) ON DELETE CASCADE,
+        UNIQUE KEY unique_cart_item (student_id, course_id),
+        INDEX idx_cart_added_date (added_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+  02-insert-sample-data.sql: |
+    -- Insert sample data for MariaDB testing
+    USE university;
+    
+    -- Insert departments
+    INSERT IGNORE INTO departments (name, code) VALUES 
+    ('MariaDB컴퓨터과학과', 'MCSE'),
+    ('MariaDB전자공학과', 'MEE'),
+    ('MariaDB기계공학과', 'MME'),
+    ('MariaDB경영학과', 'MBIZ'),
+    ('MariaDB수학과', 'MMATH');
+    
+    -- Insert current semester
+    INSERT IGNORE INTO semesters (year, season, is_current, registration_start, registration_end) VALUES 
+    (2024, 'FALL', true, '2024-08-01 09:00:00', '2024-08-31 18:00:00');
+    
+    -- Insert sample students
+    INSERT IGNORE INTO students (student_id, name, email, department_id, year) VALUES 
+    ('M2021001', '김MariaDB', 'kim.mariadb@example.com', 1, 3),
+    ('M2021002', '이MariaDB', 'lee.mariadb@example.com', 1, 3),
+    ('M2021003', '박MariaDB', 'park.mariadb@example.com', 2, 2),
+    ('M2021004', '최MariaDB', 'choi.mariadb@example.com', 3, 4),
+    ('M2021005', '정MariaDB', 'jung.mariadb@example.com', 4, 1),
+    ('M2024001', 'MariaDB테스트학생', 'mariadb-test@example.com', 1, 1);
+    
+    -- Insert sample courses (MariaDB specific features highlighted)
+    INSERT IGNORE INTO courses (course_id, course_name, professor, credits, capacity, enrolled_count, department_id, semester_id, day_time, classroom, is_active, popularity_level) VALUES 
+    ('MCSE301', 'MariaDB 데이터베이스시스템', '김MariaDB교수', 3, 40, 0, 1, 1, '월1,수3', 'MDB101', true, 'HIGH'),
+    ('MCSE302', 'MariaDB Galera Cluster', '이MariaDB교수', 3, 35, 0, 1, 1, '화2,목4', 'MDB102', true, 'MEDIUM'),
+    ('MCSE303', 'MariaDB ColumnStore', '박MariaDB교수', 3, 30, 0, 1, 1, '월3,수1', 'MDB103', true, 'HIGH'),
+    ('MEE201', 'MariaDB 성능최적화', '최MariaDB교수', 3, 25, 0, 2, 1, '화1,목3', 'MDB201', true, 'MEDIUM'),
+    ('MME301', 'MariaDB Spider Engine', '정MariaDB교수', 3, 20, 0, 3, 1, '월2,수4', 'MDB301', true, 'LOW'),
+    ('MBIZ101', 'MariaDB 비즈니스 인텔리전스', '한MariaDB교수', 3, 50, 0, 4, 1, '화3,목1', 'MDB401', true, 'HIGH'),
+    ('MMATH201', 'MariaDB 통계 및 분석', '윤MariaDB교수', 3, 40, 0, 5, 1, '월4,수2', 'MDB501', true, 'MEDIUM');
+
+  03-create-mariadb-specific-features.sql: |
+    -- MariaDB 특화 기능 및 테스트 프로시저
+    USE university;
+    
+    -- MariaDB 시퀀스 생성 (PostgreSQL 호환 기능)
+    CREATE OR REPLACE SEQUENCE test_sequence
+      START WITH 1
+      INCREMENT BY 1
+      MINVALUE 1
+      MAXVALUE 9223372036854775807
+      CACHE 20;
+    
+    -- MariaDB CTE (Common Table Expressions) 테스트 뷰
+    CREATE OR REPLACE VIEW student_course_hierarchy AS
+    WITH RECURSIVE course_prereq AS (
+      -- 기본 과목들 (선수과목 없음)
+      SELECT course_id, course_name, prerequisite_course_id, 0 as level
+      FROM courses 
+      WHERE prerequisite_course_id IS NULL
+      
+      UNION ALL
+      
+      -- 재귀적으로 선수과목이 있는 과목들
+      SELECT c.course_id, c.course_name, c.prerequisite_course_id, cp.level + 1
+      FROM courses c
+      INNER JOIN course_prereq cp ON c.prerequisite_course_id = cp.course_id
+    )
+    SELECT * FROM course_prereq ORDER BY level, course_name;
+    
+    DELIMITER $$
+    
+    -- MariaDB 특화 대용량 데이터 생성 프로시저
+    CREATE OR REPLACE PROCEDURE generate_mariadb_test_data(IN num_students INT, IN num_courses INT)
+    BEGIN
+        DECLARE i INT DEFAULT 1;
+        DECLARE course_counter INT DEFAULT 1;
+        DECLARE dept_id INT;
+        
+        -- 트랜잭션 시작
+        START TRANSACTION;
+        
+        -- 테스트 학생 생성 (MariaDB sequence 활용)
+        WHILE i <= num_students DO
+            SET dept_id = (i % 5) + 1;
+            
+            INSERT IGNORE INTO students (
+                student_id, name, email, department_id, year
+            ) VALUES (
+                CONCAT('MTEST', LPAD(i, 6, '0')), 
+                CONCAT('MariaDB테스트학생', i), 
+                CONCAT('mariadb-test', i, '@example.com'), 
+                dept_id, 
+                (i % 4) + 1
+            );
+            
+            SET i = i + 1;
+        END WHILE;
+        
+        -- 테스트 과목 생성 (MariaDB JSON 기능 활용)
+        SET i = 1;
+        WHILE i <= num_courses DO
+            INSERT IGNORE INTO courses (
+                course_id, course_name, professor, credits, capacity, enrolled_count,
+                department_id, semester_id, day_time, classroom, is_active, popularity_level
+            ) VALUES (
+                CONCAT('MTEST', LPAD(course_counter, 3, '0')),
+                CONCAT('MariaDB테스트과목', i),
+                CONCAT('MariaDB테스트교수', i),
+                3,
+                50,
+                0,
+                (i % 5) + 1,
+                1,
+                CONCAT('월', (i % 5) + 1),
+                CONCAT('MDB-TEST', LPAD(i, 3, '0')),
+                true,
+                ELT((i % 3) + 1, 'HIGH', 'MEDIUM', 'LOW')
+            );
+            
+            SET i = i + 1;
+            SET course_counter = course_counter + 1;
+        END WHILE;
+        
+        COMMIT;
+        
+        -- 결과 반환 (MariaDB returning 기능)
+        SELECT CONCAT('MariaDB 테스트 데이터 생성 완료: 학생 ', num_students, '명, 과목 ', num_courses, '개') AS result;
+    END$$
+    
+    -- MariaDB 슬로우 쿼리 테스트 프로시저 (Query Response Time 활용)
+    CREATE OR REPLACE PROCEDURE create_mariadb_slow_query(IN sleep_seconds INT)
+    BEGIN
+        -- MariaDB SLEEP 함수 사용
+        SELECT SLEEP(sleep_seconds) AS mariadb_slow_query_result;
+        
+        -- 복잡한 조인 쿼리 (MariaDB 최적화 테스트)
+        SELECT 
+            s.student_id,
+            s.name AS student_name,
+            d.name AS department_name,
+            COUNT(c.course_id) AS enrolled_courses,
+            GROUP_CONCAT(c.course_name SEPARATOR ', ') AS course_list
+        FROM students s
+        LEFT JOIN departments d ON s.department_id = d.department_id
+        LEFT JOIN enrollments e ON s.student_id = e.student_id
+        LEFT JOIN courses c ON e.course_id = c.course_id
+        WHERE s.student_id LIKE 'MTEST%'
+        GROUP BY s.student_id, s.name, d.name
+        ORDER BY enrolled_courses DESC;
+    END$$
+    
+    -- MariaDB 통계 정보 수집 프로시저
+    CREATE OR REPLACE PROCEDURE collect_mariadb_stats()
+    BEGIN
+        -- Query Response Time 통계
+        SELECT * FROM INFORMATION_SCHEMA.QUERY_RESPONSE_TIME;
+        
+        -- InnoDB 상태
+        SHOW ENGINE INNODB STATUS;
+        
+        -- 테이블 통계
+        SELECT 
+            TABLE_NAME,
+            TABLE_ROWS,
+            DATA_LENGTH,
+            INDEX_LENGTH,
+            (DATA_LENGTH + INDEX_LENGTH) AS total_size
+        FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_SCHEMA = 'university'
+        ORDER BY total_size DESC;
+    END$$
+    
+    DELIMITER ;
+    
+    -- MariaDB 특화 인덱스 생성 (Virtual Columns 포함)
+    ALTER TABLE students ADD COLUMN name_length INT AS (CHAR_LENGTH(name)) VIRTUAL;
+    CREATE INDEX idx_student_name_length ON students (name_length);
+    
+    -- MariaDB Query Response Time 플러그인 활성화
+    SET GLOBAL query_response_time_stats = ON;
+    
+    -- 초기 테스트 데이터 생성
+    CALL generate_mariadb_test_data(50, 15);
+    
+    -- 테이블 통계 업데이트
+    ANALYZE TABLE departments, semesters, students, courses, enrollments, cart_items;
+    
+    -- MariaDB 애플리케이션 사용자 권한 부여
+    GRANT ALL PRIVILEGES ON university.* TO 'mariadb-app'@'%';
+    FLUSH PRIVILEGES;

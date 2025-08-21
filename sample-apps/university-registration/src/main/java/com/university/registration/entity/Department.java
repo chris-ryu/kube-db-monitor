@@ -13,17 +13,14 @@ public class Department {
     @Column(name = "department_id")
     private Long id;
 
-    @Column(name = "department_name", nullable = false, length = 50)
+    @Column(name = "name", nullable = false, length = 100)
     private String departmentName;
 
-    @Column(nullable = false, length = 50)
+    @Column(name = "code", nullable = false, length = 10)
     private String college;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
-
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt = LocalDateTime.now();
 
     @OneToMany(mappedBy = "department", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<Student> students;
@@ -52,17 +49,9 @@ public class Department {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-
     public List<Student> getStudents() { return students; }
     public void setStudents(List<Student> students) { this.students = students; }
 
     public List<Course> getCourses() { return courses; }
     public void setCourses(List<Course> courses) { this.courses = courses; }
-
-    @PreUpdate
-    public void preUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
 }

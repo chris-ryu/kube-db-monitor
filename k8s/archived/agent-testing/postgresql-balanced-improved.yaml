@@ -1,0 +1,170 @@
+# PostgreSQL JDBC 호환성 개선된 Balanced Mode 테스트 배포
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: university-registration-balanced
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-balanced
+    agent-profile: balanced-improved
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: university-registration-balanced
+  template:
+    metadata:
+      labels:
+        app: university-registration-balanced
+        agent-profile: balanced-improved
+      annotations:
+        kubedb.monitor/enable: "true"
+        kubedb.monitor/profile: "balanced"
+        kubedb.monitor/jdbc-compatibility: "postgresql-improved"
+    spec:
+      initContainers:
+      - name: kubedb-agent-init
+        image: registry.bitgaram.info/kubedb-monitor/agent:latest
+        command: ["/bin/sh", "-c"]
+        args: 
+        - |
+          echo "Copying KubeDB Monitor Agent (Balanced Mode - JDBC Improved)..."
+          cp /opt/kubedb-agent/kubedb-monitor-agent.jar /opt/shared-agent/kubedb-monitor-agent.jar
+          echo "Agent copied successfully"
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/shared-agent
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      containers:
+      - name: university-registration
+        image: registry.bitgaram.info/kubedb-monitor/university-registration:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Agent 활성화 - 회귀테스트 검증된 autoCommit 해결 설정
+        - name: JAVA_OPTS
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=profile=balanced,db-types=postgresql,sampling-rate=0.1,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=DEBUG,safe-transformation-mode=true,postgresql-strict-compatibility=true,exclude-prepared-statement-transformation=true,preserve-transaction-boundaries=true,exclude-connection-management=false,avoid-null-parameter-transformation=true,avoid-autocommit-state-change=true,postgresql-fix-unknown-types-value=true,postgresql-fix-autocommit-conflict=true"
+        
+        # Spring Boot 프로파일
+        - name: SPRING_PROFILES_ACTIVE
+          value: "balanced"
+        
+        # PostgreSQL 연결 설정
+        - name: SPRING_DATASOURCE_JDBC_URL
+          value: "jdbc:postgresql://postgres-cluster-rw.postgres-system:5432/university?stringtype=unspecified"
+        - name: SPRING_DATASOURCE_USERNAME
+          value: "univ-app"
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: "qlcrkfka1#"
+        
+        # HikariCP 균형잡힌 설정 + autoCommit 명시
+        - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+          value: "10"
+        - name: SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE
+          value: "2"
+        - name: SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT
+          value: "30000"
+        - name: SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT
+          value: "600000"
+        - name: SPRING_DATASOURCE_HIKARI_MAX_LIFETIME
+          value: "1800000"
+        - name: SPRING_DATASOURCE_HIKARI_AUTO_COMMIT
+          value: "false"
+        # 추가적인 HikariCP autoCommit 설정
+        - name: SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_AUTOCOMMIT
+          value: "false"
+        
+        # 트랜잭션 관리 설정 - Spring 관리 트랜잭션 사용
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_CONNECTION_AUTOCOMMIT
+          value: "false"
+        - name: SPRING_TRANSACTION_DEFAULT_TIMEOUT
+          value: "30"
+        
+        # JPA/Hibernate PostgreSQL 최적화
+        - name: SPRING_JPA_DATABASE_PLATFORM
+          value: "org.hibernate.dialect.PostgreSQLDialect"
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: "create-drop"
+        - name: SPRING_JPA_SHOW_SQL
+          value: "false"
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL
+          value: "false"
+        
+        # 로깅 (DEBUG 모드 - 통합 테스트용)
+        - name: LOGGING_LEVEL_ROOT
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_COM_UNIVERSITY_REGISTRATION
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_JDBC
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_COM_ZAXXER_HIKARI
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_TRANSACTION
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_ORG_HIBERNATE
+          value: "DEBUG"
+        - name: LOGGING_LEVEL_ORG_HIBERNATE_SQL
+          value: "DEBUG"
+        
+        volumeMounts:
+        - name: kubedb-agent
+          mountPath: /opt/kubedb-agent
+        resources:
+          requests:
+            memory: "384Mi"
+            cpu: "150m"
+          limits:
+            memory: "768Mi"
+            cpu: "350m"
+        
+        # 헬스체크 - 더 관대한 설정
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 90
+          periodSeconds: 30
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 45
+          periodSeconds: 15
+          failureThreshold: 3
+      
+      volumes:
+      - name: kubedb-agent
+        emptyDir: {}
+      
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+# Service for Balanced Mode
+apiVersion: v1
+kind: Service
+metadata:
+  name: university-registration-balanced-service
+  namespace: kubedb-monitor-test
+  labels:
+    app: university-registration-balanced
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8082
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: university-registration-balanced
