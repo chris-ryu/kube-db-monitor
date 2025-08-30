@@ -97,6 +97,7 @@ public class KubeDBAgent {
                                .or(ElementMatchers.named("createStatement"))
                                .or(ElementMatchers.named("commit"))
                                .or(ElementMatchers.named("rollback"))
+                               .or(ElementMatchers.named("setAutoCommit"))
                                .or(ElementMatchers.named("close")))
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })

@@ -160,6 +160,11 @@ university-e2e: ## 수강신청 앱 E2E 테스트 (Kubernetes 환경)
 	@$(SCRIPTS_DIR)/university-registration-e2e-test.sh
 	@echo "$(GREEN)✅ 수강신청 앱 E2E 테스트 완료$(RESET)"
 
+deadlock-longrunning-test: ## 데드락/Long-running 트랜잭션 통합 테스트
+	@echo "$(YELLOW)💀 데드락/Long-running 트랜잭션 통합 테스트 시작$(RESET)"
+	@$(SCRIPTS_DIR)/deadlock-longrunning-integration-test.sh
+	@echo "$(GREEN)✅ 데드락/Long-running 트랜잭션 통합 테스트 완료$(RESET)"
+
 simple-e2e: ## 간단한 E2E 검증 (모니터링 중심)
 	@echo "$(YELLOW)⚡ 간단한 E2E 검증$(RESET)"
 	@/tmp/simple-e2e-validation.sh

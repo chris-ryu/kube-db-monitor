@@ -107,6 +107,10 @@ public class UniversalJDBCInterceptor {
                     handleRollback(target, executionTime, success, error, dbType);
                     break;
                     
+                case "setAutoCommit":
+                    handleSetAutoCommit(target, method, args, executionTime, success, error, dbType);
+                    break;
+                    
                 case "close":
                     handleClose(target, executionTime, className, dbType);
                     break;
@@ -205,6 +209,33 @@ public class UniversalJDBCInterceptor {
             
         } catch (Exception e) {
             logger.error("Error handling rollback: {}", e.getMessage());
+        }
+    }
+    
+    /**
+     * AutoCommit 모드 변경 처리
+     */
+    private static void handleSetAutoCommit(Object target, Method method, Object[] args, 
+                                          long executionTime, boolean success, Exception error, 
+                                          DatabaseType dbType) {
+        try {
+            String connectionId = getConnectionId(target);
+            boolean autoCommit = args.length > 0 ? (Boolean) args[0] : true;
+            
+            System.out.println("🔍 AutoCommit 모드 변경: " + connectionId + " → " + autoCommit + 
+                             " (" + (executionTime / 1_000_000) + "ms)");
+            
+            // Long-running transaction 감지를 위한 트랜잭션 상태 변경 기록
+            metricsCollector.recordTransactionStateChange(autoCommit, executionTime);
+            
+            // AutoCommit이 false로 설정되면 트랜잭션 시작으로 간주
+            if (!autoCommit) {
+                String transactionId = "tx-" + System.currentTimeMillis();
+                System.out.println("🚀 트랜잭션 시작 감지: " + connectionId + " (txId: " + transactionId + ")");
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error handling setAutoCommit: {}", e.getMessage());
         }
     }
     

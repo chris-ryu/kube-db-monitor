@@ -21,12 +21,14 @@ public class AgentConfig {
     private static final List<String> DEFAULT_SUPPORTED_DATABASES = Arrays.asList("mysql", "postgresql", "h2");
     private static final boolean DEFAULT_MASK_SQL_PARAMS = true;
     private static final long DEFAULT_SLOW_QUERY_THRESHOLD_MS = 1000;
+    private static final long DEFAULT_LONG_RUNNING_TRANSACTION_THRESHOLD_MS = 4000;
     
     private final boolean enabled;
     private final double samplingRate;
     private final List<String> supportedDatabases;
     private final boolean maskSqlParams;
     private final long slowQueryThresholdMs;
+    private final long longRunningTransactionThresholdMs;
     private final String collectorType;
     private final String collectorEndpoint;
     
@@ -48,6 +50,7 @@ public class AgentConfig {
         this.supportedDatabases = builder.supportedDatabases;
         this.maskSqlParams = builder.maskSqlParams;
         this.slowQueryThresholdMs = builder.slowQueryThresholdMs;
+        this.longRunningTransactionThresholdMs = builder.longRunningTransactionThresholdMs;
         this.collectorType = builder.collectorType;
         this.collectorEndpoint = builder.collectorEndpoint;
         
@@ -70,8 +73,11 @@ public class AgentConfig {
     public static AgentConfig fromArgs(String agentArgs) {
         Builder builder = new Builder();
         
+        // 환경변수에서 설정값 읽기
+        loadFromEnvironmentVariables(builder);
+        
         if (agentArgs == null || agentArgs.trim().isEmpty()) {
-            logger.info("No agent arguments provided, using defaults");
+            logger.info("No agent arguments provided, using defaults and environment variables");
             return builder.build();
         }
         
@@ -117,6 +123,16 @@ public class AgentConfig {
                 builder.slowQueryThresholdMs(threshold);
             } catch (NumberFormatException e) {
                 logger.warn("Invalid slow query threshold: {}, using default: {}", args.get("slow-query-threshold"), DEFAULT_SLOW_QUERY_THRESHOLD_MS);
+            }
+        }
+        
+        // Parse long-running transaction threshold
+        if (args.containsKey("long-running-tx-threshold")) {
+            try {
+                long threshold = Long.parseLong(args.get("long-running-tx-threshold"));
+                builder.longRunningTransactionThresholdMs(threshold);
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid long-running transaction threshold: {}, using default: {}", args.get("long-running-tx-threshold"), DEFAULT_LONG_RUNNING_TRANSACTION_THRESHOLD_MS);
             }
         }
         
@@ -190,12 +206,75 @@ public class AgentConfig {
         return args;
     }
     
+    /**
+     * 환경변수에서 설정값 로드
+     */
+    private static void loadFromEnvironmentVariables(Builder builder) {
+        // KUBEDB_MONITOR_ENABLED
+        String enabled = System.getenv("KUBEDB_MONITOR_ENABLED");
+        if (enabled != null) {
+            builder.enabled(Boolean.parseBoolean(enabled));
+            logger.info("Loaded KUBEDB_MONITOR_ENABLED from environment: {}", enabled);
+        }
+        
+        // KUBEDB_MONITOR_SAMPLING_RATE
+        String samplingRate = System.getenv("KUBEDB_MONITOR_SAMPLING_RATE");
+        if (samplingRate != null) {
+            try {
+                double rate = Double.parseDouble(samplingRate);
+                builder.samplingRate(rate);
+                logger.info("Loaded KUBEDB_MONITOR_SAMPLING_RATE from environment: {}", rate);
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid KUBEDB_MONITOR_SAMPLING_RATE: {}", samplingRate);
+            }
+        }
+        
+        // KUBEDB_MONITOR_SLOW_QUERY_THRESHOLD_MS
+        String slowQueryThreshold = System.getenv("KUBEDB_MONITOR_SLOW_QUERY_THRESHOLD_MS");
+        if (slowQueryThreshold != null) {
+            try {
+                long threshold = Long.parseLong(slowQueryThreshold);
+                builder.slowQueryThresholdMs(threshold);
+                logger.info("Loaded KUBEDB_MONITOR_SLOW_QUERY_THRESHOLD_MS from environment: {}", threshold);
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid KUBEDB_MONITOR_SLOW_QUERY_THRESHOLD_MS: {}", slowQueryThreshold);
+            }
+        }
+        
+        // KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS
+        String longRunningTxThreshold = System.getenv("KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS");
+        if (longRunningTxThreshold != null) {
+            try {
+                long threshold = Long.parseLong(longRunningTxThreshold);
+                builder.longRunningTransactionThresholdMs(threshold);
+                logger.info("Loaded KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS from environment: {}", threshold);
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS: {}", longRunningTxThreshold);
+            }
+        }
+        
+        // KUBEDB_MONITOR_COLLECTOR_ENDPOINT
+        String collectorEndpoint = System.getenv("KUBEDB_MONITOR_COLLECTOR_ENDPOINT");
+        if (collectorEndpoint != null && !collectorEndpoint.trim().isEmpty()) {
+            builder.collectorEndpoint(collectorEndpoint);
+            logger.info("Loaded KUBEDB_MONITOR_COLLECTOR_ENDPOINT from environment: {}", collectorEndpoint);
+        }
+        
+        // KUBEDB_MONITOR_LOG_LEVEL
+        String logLevel = System.getenv("KUBEDB_MONITOR_LOG_LEVEL");
+        if (logLevel != null && !logLevel.trim().isEmpty()) {
+            builder.logLevel(logLevel);
+            logger.info("Loaded KUBEDB_MONITOR_LOG_LEVEL from environment: {}", logLevel);
+        }
+    }
+    
     // Getters
     public boolean isEnabled() { return enabled; }
     public double getSamplingRate() { return samplingRate; }
     public List<String> getSupportedDatabases() { return supportedDatabases; }
     public boolean isMaskSqlParams() { return maskSqlParams; }
     public long getSlowQueryThresholdMs() { return slowQueryThresholdMs; }
+    public long getLongRunningTransactionThresholdMs() { return longRunningTransactionThresholdMs; }
     public String getCollectorType() { return collectorType; }
     public String getCollectorEndpoint() { return collectorEndpoint; }
     
@@ -217,6 +296,7 @@ public class AgentConfig {
         private List<String> supportedDatabases = DEFAULT_SUPPORTED_DATABASES;
         private boolean maskSqlParams = DEFAULT_MASK_SQL_PARAMS;
         private long slowQueryThresholdMs = DEFAULT_SLOW_QUERY_THRESHOLD_MS;
+        private long longRunningTransactionThresholdMs = DEFAULT_LONG_RUNNING_TRANSACTION_THRESHOLD_MS;
         private String collectorType = "COMPOSITE"; // Default collector type
         private String collectorEndpoint;
         
@@ -254,6 +334,11 @@ public class AgentConfig {
         
         public Builder slowQueryThresholdMs(long slowQueryThresholdMs) {
             this.slowQueryThresholdMs = slowQueryThresholdMs;
+            return this;
+        }
+        
+        public Builder longRunningTransactionThresholdMs(long longRunningTransactionThresholdMs) {
+            this.longRunningTransactionThresholdMs = longRunningTransactionThresholdMs;
             return this;
         }
         
@@ -331,6 +416,7 @@ public class AgentConfig {
                 ", supportedDatabases=" + supportedDatabases +
                 ", maskSqlParams=" + maskSqlParams +
                 ", slowQueryThresholdMs=" + slowQueryThresholdMs +
+                ", longRunningTransactionThresholdMs=" + longRunningTransactionThresholdMs +
                 ", collectorType='" + collectorType + '\'' +
                 ", collectorEndpoint='" + collectorEndpoint + '\'' +
                 ", postgresqlStrictCompatibility=" + postgresqlStrictCompatibility +

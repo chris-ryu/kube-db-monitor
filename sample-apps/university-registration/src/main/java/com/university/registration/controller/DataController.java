@@ -326,6 +326,20 @@ public class DataController {
             logger.info("🐌 DEMO: Long Running Transaction completed - actual duration: {}ms, queries: {}", 
                        actualDuration, queryCount);
 
+            // MetricsService에 장기 실행 트랜잭션 이벤트 전송 (테스트용)
+            try {
+                String transactionId = "long-tx-" + startTime;
+                Map<String, Object> txDetails = Map.of(
+                    "execution_time_ms", actualDuration,
+                    "query_count", queryCount,
+                    "start_time", startTime
+                );
+                metricsService.sendTransactionEvent(transactionId, "long_running_test", txDetails);
+                logger.info("📊 Sent long-running transaction event to MetricsService: {}ms", actualDuration);
+            } catch (Exception e) {
+                logger.warn("Failed to send transaction event to MetricsService: {}", e.getMessage());
+            }
+
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
@@ -889,6 +903,35 @@ public class DataController {
             }
             
             return "tx-" + transactionId + ": " + e.getClass().getSimpleName();
+        }
+    }
+
+    /**
+     * MetricsService 상태 확인 (디버깅용)
+     */
+    @GetMapping("/debug/metrics-service-status")
+    public ResponseEntity<Map<String, Object>> debugMetricsServiceStatus() {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            result.put("metricsService_isNull", metricsService == null);
+            result.put("metricsService_class", metricsService != null ? metricsService.getClass().getName() : "null");
+            result.put("timestamp", System.currentTimeMillis());
+            
+            // 강제로 초기화 메시지 로그
+            if (metricsService != null) {
+                logger.info("🚀 DEBUG: MetricsService instance exists and is accessible");
+                result.put("status", "MetricsService is available");
+            } else {
+                logger.error("❌ DEBUG: MetricsService is null - Bean injection failed");
+                result.put("status", "MetricsService is null");
+            }
+            
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("🐛 DEBUG: Error checking MetricsService status", e);
+            result.put("error", e.getMessage());
+            result.put("status", "error");
+            return ResponseEntity.status(500).body(result);
         }
     }
 }

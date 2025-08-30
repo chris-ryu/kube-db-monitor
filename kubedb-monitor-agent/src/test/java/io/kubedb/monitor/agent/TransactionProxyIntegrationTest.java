@@ -55,7 +55,8 @@ class TransactionProxyIntegrationTest {
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
             
             // Connection 프록시 생성
-            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config);
+            MetricsCollector metricsCollector = new MetricsCollector(config);
+            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config, metricsCollector);
             String connectionId = rawConn.toString();
             
             // 1. Transaction 시작 (setAutoCommit(false))
@@ -97,7 +98,8 @@ class TransactionProxyIntegrationTest {
         try (Connection rawConn = DriverManager.getConnection(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
             
-            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config);
+            MetricsCollector metricsCollector = new MetricsCollector(config);
+            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config, metricsCollector);
             String connectionId = rawConn.toString();
             
             // Transaction 시작
@@ -126,7 +128,8 @@ class TransactionProxyIntegrationTest {
         try (Connection rawConn = DriverManager.getConnection(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
             
-            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config);
+            MetricsCollector metricsCollector = new MetricsCollector(config);
+            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config, metricsCollector);
             
             proxyConn.setAutoCommit(false);
             String connectionId = rawConn.toString();
@@ -163,7 +166,8 @@ class TransactionProxyIntegrationTest {
                 stmt.executeUpdate("INSERT INTO test_table (name) VALUES ('test') ON CONFLICT DO NOTHING");
             }
             
-            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config);
+            MetricsCollector metricsCollector = new MetricsCollector(config);
+            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config, metricsCollector);
             
             proxyConn.setAutoCommit(false);
             String connectionId = rawConn.toString();
@@ -201,7 +205,8 @@ class TransactionProxyIntegrationTest {
         try (Connection rawConn = DriverManager.getConnection(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
             
-            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config);
+            MetricsCollector metricsCollector = new MetricsCollector(config);
+            PostgreSQLConnectionProxy proxyConn = new PostgreSQLConnectionProxy(rawConn, config, metricsCollector);
             
             proxyConn.setAutoCommit(false);
             String connectionId = rawConn.toString();

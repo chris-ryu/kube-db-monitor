@@ -76,20 +76,20 @@ public class HttpMetricsTransmitter {
     }
     
     /**
-     * 장기 실행 트랜잭션 메트릭 전송
+     * 장기 실행 트랜잭션 알림 전송
      */
-    public void transmitLongRunningTransaction(String transactionId, long durationMs, String connectionId) {
+    public void transmitLongRunningTransactionAlert(String transactionId, String connectionId, String threadName, long durationMs, long startTime) {
         if (!shouldTransmit()) {
             return;
         }
         
         executor.submit(() -> {
             try {
-                String json = createLongRunningTransactionJson(transactionId, durationMs, connectionId);
+                String json = createLongRunningTransactionAlertJson(transactionId, connectionId, threadName, durationMs, startTime);
                 sendHttpPost(json);
-                logger.info("[KubeDB] Long-running transaction metric transmitted: {} ms", durationMs);
+                logger.info("[KubeDB] Long-running transaction alert transmitted: {} ms", durationMs);
             } catch (Exception e) {
-                logger.warn("[KubeDB] Failed to transmit long-running transaction metric: {}", e.getMessage());
+                logger.warn("[KubeDB] Failed to transmit long-running transaction alert: {}", e.getMessage());
             }
         });
     }
@@ -193,9 +193,9 @@ public class HttpMetricsTransmitter {
     }
     
     /**
-     * 장기 실행 트랜잭션 메트릭 JSON 생성
+     * 장기 실행 트랜잭션 알림 JSON 생성
      */
-    private String createLongRunningTransactionJson(String transactionId, long durationMs, String connectionId) {
+    private String createLongRunningTransactionAlertJson(String transactionId, String connectionId, String threadName, long durationMs, long startTime) {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z";
         
         return String.format(
@@ -206,12 +206,14 @@ public class HttpMetricsTransmitter {
             "\"namespace\": \"%s\"," +
             "\"data\": {" +
                 "\"query_id\": \"long-tx-%s\"," +
-                "\"sql_type\": \"TRANSACTION\"," +
+                "\"sql_type\": \"LONG_RUNNING\"," +
                 "\"execution_time_ms\": %d," +
                 "\"connection_id\": \"%s\"," +
                 "\"transaction_id\": \"%s\"," +
                 "\"transaction_duration\": %d," +
-                "\"status\": \"long_running\"" +
+                "\"thread_name\": \"%s\"," +
+                "\"start_time\": %d," +
+                "\"status\": \"active\"" +
             "}" +
             "}",
             timestamp,
@@ -221,7 +223,9 @@ public class HttpMetricsTransmitter {
             durationMs,
             connectionId,
             transactionId,
-            durationMs
+            durationMs,
+            threadName,
+            startTime
         );
     }
     

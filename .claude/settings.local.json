@@ -189,7 +189,9 @@
       "Bash(JDBCTransformerFactory.java )",
       "Bash(StatementTransformer.java )",
       "Bash(ResultSetTransformer.java )",
-      "Bash(PostgreSQLDriverProxy.java)"
+      "Bash(PostgreSQLDriverProxy.java)",
+      "Bash(./scripts/long-running-test-bytebuddy.sh:*)",
+      "Bash(./scripts/realtime-transaction-test.sh:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

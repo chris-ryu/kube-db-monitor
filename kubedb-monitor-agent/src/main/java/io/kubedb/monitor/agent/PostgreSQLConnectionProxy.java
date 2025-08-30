@@ -28,10 +28,12 @@ public class PostgreSQLConnectionProxy implements Connection {
     // Transaction 모니터링을 위한 컴포넌트들
     private final TransactionAwareJDBCInterceptor transactionInterceptor;
     private final String connectionId;
+    private final io.kubedb.monitor.agent.MetricsCollector metricsCollector;
     
-    public PostgreSQLConnectionProxy(Connection delegate, AgentConfig config) {
+    public PostgreSQLConnectionProxy(Connection delegate, AgentConfig config, io.kubedb.monitor.agent.MetricsCollector metricsCollector) {
         this.delegate = delegate;
         this.config = config;
+        this.metricsCollector = metricsCollector;
         this.compatibilityHelper = new PostgreSQLCompatibilityHelper(config);
         this.connectionId = generateConnectionId(delegate);
         
@@ -130,8 +132,15 @@ public class PostgreSQLConnectionProxy implements Connection {
     public void setAutoCommit(boolean autoCommit) throws SQLException {
         logger.fine("[KubeDB] PostgreSQL Connection autoCommit 변경: " + autoCommit + " [" + connectionId + "]");
         
-        // Transaction 모니터링: setAutoCommit 호출 전에 인터셉터에 알림
+        long startTime = System.nanoTime();
+        
+        // Transaction 모니터링: MetricsCollector에 알림
         try {
+            if (metricsCollector != null) {
+                metricsCollector.recordTransactionStateChange(autoCommit, System.nanoTime() - startTime);
+            }
+            
+            // 기존 인터셉터에도 알림
             transactionInterceptor.onSetAutoCommit(delegate, autoCommit);
         } catch (Exception e) {
             logger.warning("[KubeDB] Transaction 모니터링 중 오류 발생: " + e.getMessage());
@@ -149,8 +158,16 @@ public class PostgreSQLConnectionProxy implements Connection {
     public void commit() throws SQLException {
         logger.fine("[KubeDB] PostgreSQL Connection commit 실행 [" + connectionId + "]");
         
-        // Transaction 모니터링: commit 전에 인터셉터에 알림
+        long startTime = System.nanoTime();
+        
+        // Transaction 모니터링: MetricsCollector에 알림
         try {
+            if (metricsCollector != null) {
+                String transactionId = "tx-" + connectionId + "-" + System.nanoTime();
+                metricsCollector.recordCommit(System.nanoTime() - startTime, connectionId, transactionId);
+            }
+            
+            // 기존 인터셉터에도 알림
             transactionInterceptor.onTransactionCommit(delegate);
         } catch (Exception e) {
             logger.warning("[KubeDB] Transaction commit 모니터링 중 오류 발생: " + e.getMessage());

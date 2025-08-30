@@ -2,7 +2,12 @@ package io.kubedb.monitor.agent;
 
 import java.sql.SQLException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+import java.util.Map;
 
 /**
  * 프록시 기반 메트릭스 수집기
@@ -27,10 +32,24 @@ public class MetricsCollector {
     private volatile long totalQueryTime = 0;
     private volatile long maxQueryTime = 0;
     
+    // Long-running transaction 추적
+    private final Map<String, TransactionInfo> activeTransactions = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService transactionMonitor = Executors.newSingleThreadScheduledExecutor(
+        r -> {
+            Thread t = new Thread(r, "KubeDB-Transaction-Monitor");
+            t.setDaemon(true);
+            return t;
+        }
+    );
+    
     public MetricsCollector(AgentConfig config) {
         this.config = config;
         this.transmitter = new HttpMetricsTransmitter(config);
-        logger.info("[KubeDB] MetricsCollector 초기화됨 (Proxy Mode with HTTP transmission)");
+        
+        // Long-running transaction 모니터링 스케줄러 시작 (5초마다 체크)
+        transactionMonitor.scheduleAtFixedRate(this::checkLongRunningTransactions, 5, 5, TimeUnit.SECONDS);
+        
+        logger.info("[KubeDB] MetricsCollector 초기화됨 (Proxy Mode with HTTP transmission and Long-running transaction monitoring)");
     }
     
     /**
@@ -71,11 +90,41 @@ public class MetricsCollector {
     }
     
     /**
+     * 트랜잭션 시작 기록
+     */
+    public void recordTransactionBegin(String connectionId, String transactionId) {
+        if (!config.isEnabled()) {
+            return;
+        }
+        
+        TransactionInfo txInfo = new TransactionInfo();
+        txInfo.transactionId = transactionId;
+        txInfo.connectionId = connectionId;
+        txInfo.startTime = System.currentTimeMillis();
+        txInfo.threadName = Thread.currentThread().getName();
+        
+        activeTransactions.put(transactionId, txInfo);
+        logger.fine(String.format("[KubeDB] Transaction started: %s on %s", transactionId, connectionId));
+    }
+    
+    /**
      * 트랜잭션 상태 변경 기록
      */
     public void recordTransactionStateChange(boolean autoCommit, long executionTimeNanos) {
         if (!config.isEnabled()) {
             return;
+        }
+        
+        String connectionId = "conn-" + Thread.currentThread().getId();
+        String transactionId = "tx-" + System.nanoTime();
+        
+        if (!autoCommit) {
+            // 트랜잭션 시작
+            recordTransactionBegin(connectionId, transactionId);
+        } else {
+            // 트랜잭션 자동 커밋 모드로 변경 - 활성 트랜잭션 종료
+            activeTransactions.entrySet().removeIf(entry -> 
+                connectionId.equals(entry.getValue().connectionId));
         }
         
         long executionTimeMs = executionTimeNanos / 1_000_000;
@@ -101,6 +150,9 @@ public class MetricsCollector {
         commitCount.incrementAndGet();
         long executionTimeMs = executionTimeNanos / 1_000_000;
         
+        // 활성 트랜잭션에서 제거
+        activeTransactions.remove(transactionId);
+        
         // HTTP 전송
         transmitter.transmitTransactionMetric("COMMIT", executionTimeMs, connectionId, transactionId);
         
@@ -124,6 +176,9 @@ public class MetricsCollector {
         
         rollbackCount.incrementAndGet();
         long executionTimeMs = executionTimeNanos / 1_000_000;
+        
+        // 활성 트랜잭션에서 제거
+        activeTransactions.remove(transactionId);
         
         // HTTP 전송
         transmitter.transmitTransactionMetric("ROLLBACK", executionTimeMs, connectionId, transactionId);
@@ -238,12 +293,70 @@ public class MetricsCollector {
     }
     
     /**
+     * Long-running transaction 체크 및 알림
+     */
+    private void checkLongRunningTransactions() {
+        if (!config.isEnabled()) {
+            return;
+        }
+        
+        long currentTime = System.currentTimeMillis();
+        long thresholdMs = config.getLongRunningTransactionThresholdMs(); // 기본 4초
+        
+        for (TransactionInfo txInfo : activeTransactions.values()) {
+            long durationMs = currentTime - txInfo.startTime;
+            
+            if (durationMs > thresholdMs && !txInfo.alreadyReported) {
+                // Long-running transaction 감지
+                txInfo.alreadyReported = true;
+                
+                logger.warning(String.format("[KubeDB] Long-running transaction detected: %s (%dms) on connection %s", 
+                    txInfo.transactionId, durationMs, txInfo.connectionId));
+                
+                // HTTP 전송
+                transmitter.transmitLongRunningTransactionAlert(
+                    txInfo.transactionId, 
+                    txInfo.connectionId, 
+                    txInfo.threadName, 
+                    durationMs, 
+                    txInfo.startTime
+                );
+            }
+        }
+    }
+    
+    /**
      * 리소스 정리
      */
     public void shutdown() {
+        if (transactionMonitor != null && !transactionMonitor.isShutdown()) {
+            transactionMonitor.shutdown();
+            try {
+                if (!transactionMonitor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    transactionMonitor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                transactionMonitor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        
         if (transmitter != null) {
             transmitter.shutdown();
         }
+        
+        activeTransactions.clear();
         logger.info("[KubeDB] MetricsCollector shutdown completed");
+    }
+    
+    /**
+     * 트랜잭션 정보 클래스
+     */
+    private static class TransactionInfo {
+        String transactionId;
+        String connectionId;
+        String threadName;
+        long startTime;
+        boolean alreadyReported = false;
     }
 }

@@ -58,7 +58,15 @@ spec:
           value: "development"
         # Java 옵션과 KubeDB Agent
         - name: JAVA_OPTS
-          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=postgresql,sampling-rate=1.0,slow-query-threshold=50,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=DEBUG"
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=postgresql,sampling-rate=1.0,slow-query-threshold=50,long-running-tx-threshold=4000,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=DEBUG"
+        
+        # KubeDB Monitor Agent 환경변수
+        - name: KUBEDB_MONITOR_ENABLED
+          value: "true"
+        - name: KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS
+          value: "4000"
+        - name: KUBEDB_MONITOR_COLLECTOR_ENDPOINT
+          value: "http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
         
         # PostgreSQL 연결 설정
         - name: SPRING_DATASOURCE_JDBC_URL

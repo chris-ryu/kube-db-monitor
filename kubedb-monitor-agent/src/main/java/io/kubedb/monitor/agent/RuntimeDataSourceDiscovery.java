@@ -241,6 +241,9 @@ public class RuntimeDataSourceDiscovery {
      * Connection을 메트릭 수집 프록시로 감싸기
      */
     private Connection wrapConnection(Connection originalConnection) {
+        // 모든 DB에 대해 범용 프록시 사용 (UniversalJDBCInterceptor 활용)
+        
+        // 폴백: 기존 JDK Dynamic Proxy 사용
         return (Connection) Proxy.newProxyInstance(
             originalConnection.getClass().getClassLoader(),
             new Class<?>[]{Connection.class},
@@ -269,6 +272,10 @@ public class RuntimeDataSourceDiscovery {
                         metricsCollector.recordRollback(executionTime, 
                                                        originalConnection.toString(), 
                                                        "tx-" + System.currentTimeMillis());
+                    } else if ("setAutoCommit".equals(methodName)) {
+                        // Transaction state change 감지
+                        boolean autoCommit = args.length > 0 ? (Boolean) args[0] : true;
+                        metricsCollector.recordTransactionStateChange(autoCommit, executionTime);
                     }
                     
                     return result;
