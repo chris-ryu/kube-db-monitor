@@ -14,6 +14,7 @@ public class MetricsCollector {
     private static final Logger logger = Logger.getLogger(MetricsCollector.class.getName());
     
     private final AgentConfig config;
+    private final HttpMetricsTransmitter transmitter;
     
     // 기본 메트릭스 카운터들
     private final AtomicLong queryCount = new AtomicLong(0);
@@ -28,13 +29,21 @@ public class MetricsCollector {
     
     public MetricsCollector(AgentConfig config) {
         this.config = config;
-        logger.info("[KubeDB] MetricsCollector 초기화됨 (Proxy Mode)");
+        this.transmitter = new HttpMetricsTransmitter(config);
+        logger.info("[KubeDB] MetricsCollector 초기화됨 (Proxy Mode with HTTP transmission)");
     }
     
     /**
      * SQL 쿼리 실행 기록
      */
     public void recordQuery(String sql, long executionTimeNanos) {
+        recordQuery(sql, executionTimeNanos, "unknown-connection", Thread.currentThread().getName());
+    }
+    
+    /**
+     * SQL 쿼리 실행 기록 (연결 정보 포함)
+     */
+    public void recordQuery(String sql, long executionTimeNanos, String connectionId, String threadName) {
         if (!config.isEnabled()) {
             return;
         }
@@ -47,6 +56,9 @@ public class MetricsCollector {
         if (executionTimeMs > maxQueryTime) {
             maxQueryTime = executionTimeMs;
         }
+        
+        // HTTP 전송
+        transmitter.transmitQueryMetric(sql, executionTimeMs, connectionId, threadName);
         
         // 느린 쿼리 감지
         if (executionTimeMs > config.getSlowQueryThresholdMs()) {
@@ -75,12 +87,23 @@ public class MetricsCollector {
      * 커밋 기록
      */
     public void recordCommit(long executionTimeNanos) {
+        recordCommit(executionTimeNanos, "unknown-connection", "tx-" + System.nanoTime());
+    }
+    
+    /**
+     * 커밋 기록 (연결 정보 포함)
+     */
+    public void recordCommit(long executionTimeNanos, String connectionId, String transactionId) {
         if (!config.isEnabled()) {
             return;
         }
         
         commitCount.incrementAndGet();
         long executionTimeMs = executionTimeNanos / 1_000_000;
+        
+        // HTTP 전송
+        transmitter.transmitTransactionMetric("COMMIT", executionTimeMs, connectionId, transactionId);
+        
         logger.fine(String.format("[KubeDB] Transaction committed (%dms)", executionTimeMs));
     }
     
@@ -88,12 +111,23 @@ public class MetricsCollector {
      * 롤백 기록
      */
     public void recordRollback(long executionTimeNanos) {
+        recordRollback(executionTimeNanos, "unknown-connection", "tx-" + System.nanoTime());
+    }
+    
+    /**
+     * 롤백 기록 (연결 정보 포함)
+     */
+    public void recordRollback(long executionTimeNanos, String connectionId, String transactionId) {
         if (!config.isEnabled()) {
             return;
         }
         
         rollbackCount.incrementAndGet();
         long executionTimeMs = executionTimeNanos / 1_000_000;
+        
+        // HTTP 전송
+        transmitter.transmitTransactionMetric("ROLLBACK", executionTimeMs, connectionId, transactionId);
+        
         logger.fine(String.format("[KubeDB] Transaction rolled back (%dms)", executionTimeMs));
     }
     
@@ -179,5 +213,15 @@ public class MetricsCollector {
                                queryCount, commitCount, rollbackCount, errorCount, 
                                connectionCloseCount, totalQueryTime, maxQueryTime);
         }
+    }
+    
+    /**
+     * 리소스 정리
+     */
+    public void shutdown() {
+        if (transmitter != null) {
+            transmitter.shutdown();
+        }
+        logger.info("[KubeDB] MetricsCollector shutdown completed");
     }
 }

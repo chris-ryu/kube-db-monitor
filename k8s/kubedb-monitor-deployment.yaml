@@ -53,53 +53,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kubedb-monitor-agent
-  namespace: kubedb-monitor
-  labels:
-    app: kubedb-monitor-agent
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kubedb-monitor-agent
-  template:
-    metadata:
-      labels:
-        app: kubedb-monitor-agent
-    spec:
-      imagePullSecrets:
-      - name: registry-secret
-      containers:
-      - name: agent
-        image: registry.bitgaram.info/kubedb-monitor/agent:latest
-        imagePullPolicy: Always
-        env:
-        - name: LONG_RUNNING_THRESHOLD_MS
-          value: "4000"
-        - name: COLLECTOR_TYPE
-          value: "http"
-        - name: COLLECTOR_ENDPOINT
-          value: "http://kubedb-monitor-control-plane:8080/api/metrics"
-        - name: DB_TYPES
-          value: "postgresql"
-        - name: SAMPLING_RATE
-          value: "1.0"
-        - name: SLOW_QUERY_THRESHOLD
-          value: "50"
-        - name: LOG_LEVEL
-          value: "DEBUG"
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "500m"
-
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: kubedb-monitor-dashboard
   namespace: kubedb-monitor
   labels:
@@ -128,8 +81,8 @@ spec:
           value: "production"
         - name: CONTROL_PLANE_URL
           value: "ws://kubedb-monitor-control-plane:8080"
-        - name: WEBSOCKET_URL
-          value: "wss://kube-db-mon-dashboard.bitgaram.info/ws"
+        - name: NEXT_PUBLIC_WS_URL
+          value: "wss://kube-db-mon-controlplane.bitgaram.info/ws"
         - name: NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS
           value: "4000"
         - name: NEXT_PUBLIC_DASHBOARD_TITLE
@@ -179,24 +132,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: kubedb-monitor-agent
-  namespace: kubedb-monitor
-  labels:
-    app: kubedb-monitor-agent
-spec:
-  type: ClusterIP
-  ports:
-  - port: 8080
-    targetPort: 8080
-    protocol: TCP
-    name: http
-  selector:
-    app: kubedb-monitor-agent
-
----
-apiVersion: v1
-kind: Service
-metadata:
   name: kubedb-monitor-dashboard
   namespace: kubedb-monitor
   labels:
@@ -218,21 +153,6 @@ metadata:
   name: kubedb-monitor-config
   namespace: kubedb-monitor
 data:
-  # Agent Configuration
-  agent.properties: |
-    collector.type=http
-    collector.endpoint=http://kubedb-monitor-control-plane:8080/api/metrics
-    db.types=postgresql
-    sampling.rate=1.0
-    slow.query.threshold=50
-    log.level=DEBUG
-    long.running.threshold.ms=4000
-    production.safe.mode=true
-    deadlock.detection.enabled=true
-    transaction.monitoring.enabled=true
-    tps.monitoring.enabled=true
-    sql.parameter.masking=true
-    sensitive.data.protection=true
   
   # Control Plane Configuration
   control-plane.yaml: |
@@ -258,7 +178,7 @@ data:
     NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS=4000
     NEXT_PUBLIC_DASHBOARD_TITLE=🚀 Advanced KubeDB Monitor Dashboard
     CONTROL_PLANE_URL=ws://kubedb-monitor-control-plane:8080
-    WEBSOCKET_URL=wss://kube-db-mon-dashboard.bitgaram.info/ws
+    WEBSOCKET_URL=wss://kube-db-mon-controlplane.bitgaram.info/ws
   
   # Dashboard Title
   dashboard.title: "🚀 FlowLight DB Monitor Dashboard"

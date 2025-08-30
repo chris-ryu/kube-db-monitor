@@ -174,7 +174,11 @@
       "Bash(unzip:*)",
       "Bash(cat:*)",
       "Bash(./scripts/ui-backend-api-test.sh:*)",
-      "Bash(/Users/narzis/workspace/kube-db-monitor/scripts/ui-backend-api-test.sh:*)"
+      "Bash(/Users/narzis/workspace/kube-db-monitor/scripts/ui-backend-api-test.sh:*)",
+      "Bash(for i in {1..20})",
+      "Bash(open /tmp/websocket-dashboard-test.html)",
+      "Bash(bash:*)",
+      "Read(/Users/narzis/workspace/**)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

@@ -62,7 +62,7 @@ export default function Dashboard() {
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
       (window.location.hostname === 'localhost' 
         ? 'ws://localhost:8081/ws'
-        : `wss://kube-db-mon-dashboard.bitgaram.info/ws`)
+        : 'wss://kube-db-mon-controlplane.bitgaram.info/ws')
     
     console.log(`📍 Environment: ${process.env.NODE_ENV}, Host: ${window.location.hostname}`)
     console.log(`🔗 WebSocket URL: ${wsUrl}, Use WebSocket: ${useWebSocket}`)
@@ -133,16 +133,19 @@ export default function Dashboard() {
 
   const processWebSocketMessage = (message: any) => {
     console.log('🔍 Processing WebSocket message type:', message.type)
+    console.log('🔍 Full WebSocket message structure:', JSON.stringify(message, null, 2))
+    
     // Handle different types of WebSocket messages
     if (message.type === 'query_metrics' || message.type === 'metric' || message.type === 'query_execution') {
       console.log('📊 Processing query metrics:', message.data)
+      // message.data is the full QueryMetrics object from Control-plane
       processMetric(message.data)
     } else if (message.type === 'transaction_event') {
       console.log('🔄 Processing transaction event:', message.data)
       processTransactionEvent(message.data)
     } else if (message.type === 'deadlock_event') {
       console.log('⚠️ Processing deadlock event:', message.data)
-      console.log('🔍 Full message structure:', JSON.stringify(message, null, 2))
+      console.log('🔍 Full deadlock message structure:', JSON.stringify(message, null, 2))
       processDeadlockEvent(message.data)
     } else if (message.type === 'long_running_transaction') {
       console.log('🐌 Processing long running transaction event:', message.data)
