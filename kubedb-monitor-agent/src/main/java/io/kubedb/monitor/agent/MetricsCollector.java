@@ -147,12 +147,20 @@ public class MetricsCollector {
      * 연결 종료 기록
      */
     public void recordConnectionClose() {
+        recordConnectionClose(0, "unknown-connection");
+    }
+    
+    /**
+     * 연결 종료 기록 (시간 및 연결 정보 포함)
+     */
+    public void recordConnectionClose(long executionTimeNanos, String connectionId) {
         if (!config.isEnabled()) {
             return;
         }
         
         connectionCloseCount.incrementAndGet();
-        logger.fine("[KubeDB] Connection closed");
+        long executionTimeMs = executionTimeNanos / 1_000_000;
+        logger.fine(String.format("[KubeDB] Connection closed (%dms): %s", executionTimeMs, connectionId));
     }
     
     /**
@@ -165,6 +173,20 @@ public class MetricsCollector {
         
         errorCount.incrementAndGet();
         logger.warning(String.format("[KubeDB] SQL Error in %s: %s", operation, error.getMessage()));
+    }
+    
+    /**
+     * 오류 기록 (범용)
+     */
+    public void recordError(Exception error, long executionTimeNanos, String connectionId) {
+        if (!config.isEnabled()) {
+            return;
+        }
+        
+        errorCount.incrementAndGet();
+        long executionTimeMs = executionTimeNanos / 1_000_000;
+        logger.warning(String.format("[KubeDB] Error (%dms) on %s: %s", 
+                      executionTimeMs, connectionId, error.getMessage()));
     }
     
     /**

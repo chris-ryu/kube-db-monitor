@@ -104,7 +104,7 @@ export type SqlType =
   | 'TRUNCATE' 
   | 'UNKNOWN'
 
-export type ExecutionStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CANCELLED'
+export type ExecutionStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CANCELLED' | 'completed' | 'error'
 
 export type EventType = 
   | 'query_execution'

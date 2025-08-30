@@ -22,7 +22,20 @@
             <artifactId>kubedb-monitor-common</artifactId>
         </dependency>
         
-        <!-- ASM for bytecode manipulation -->
+        <!-- ByteBuddy for safer bytecode manipulation -->
+        <dependency>
+            <groupId>net.bytebuddy</groupId>
+            <artifactId>byte-buddy</artifactId>
+            <version>1.14.10</version>
+        </dependency>
+        <dependency>
+            <groupId>net.bytebuddy</groupId>
+            <artifactId>byte-buddy-agent</artifactId>
+            <version>1.14.10</version>
+        </dependency>
+        
+        <!-- Keep ASM for fallback compatibility if needed -->
+        <!--
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm</artifactId>
@@ -35,6 +48,7 @@
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm-commons</artifactId>
         </dependency>
+        -->
         
         <!-- Logging -->
         <dependency>

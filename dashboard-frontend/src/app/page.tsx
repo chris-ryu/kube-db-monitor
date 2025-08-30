@@ -299,15 +299,24 @@ export default function Dashboard() {
   }
 
   const calculateAndSetAggregatedMetrics = (updatedMetrics: QueryMetrics[]) => {
+    console.log('🎯 Calculating aggregated metrics with', updatedMetrics.length, 'total metrics')
+    
     const now = Date.now()
     const oneMinuteAgo = now - 60000
     const recentMetrics = updatedMetrics.filter(m => 
       new Date(m.timestamp).getTime() > oneMinuteAgo
     )
     
+    console.log('📊 Recent metrics (last 1 min):', recentMetrics.length)
+    
     const queryMetrics = recentMetrics.filter(m => 
       m.event_type === 'query_execution' && m.data
     )
+    
+    console.log('🔍 Query metrics found:', queryMetrics.length)
+    queryMetrics.forEach((m, i) => {
+      console.log(`  Query ${i+1}: type=${m.data?.sql_type}, time=${m.data?.execution_time_ms}ms, status=${m.data?.status}`)
+    })
     
     const qps = queryMetrics.length / 60
     
@@ -315,11 +324,16 @@ export default function Dashboard() {
       .map(m => m.data?.execution_time_ms)
       .filter((time): time is number => time !== undefined && time > 0)
     
+    console.log('⏱️ Execution times:', executionTimes)
+    
     const avgLatency = executionTimes.length > 0
       ? executionTimes.reduce((sum, time) => sum + time, 0) / executionTimes.length
       : 0
     
-    const errors = queryMetrics.filter(m => m.data?.status === 'ERROR')
+    // Fix status check - Control-plane sends 'completed', not 'ERROR'
+    const errors = queryMetrics.filter(m => 
+      m.data?.status === 'ERROR' || m.data?.status === 'error'
+    )
     const errorRate = queryMetrics.length > 0 
       ? (errors.length / queryMetrics.length) * 100 
       : 0
@@ -328,11 +342,13 @@ export default function Dashboard() {
     const activeConnections = latestMetric?.metrics?.connection_pool_active ?? 0
     
     // Calculate transactions per second based on query metrics
-    // For demo purposes, consider successful queries as completed transactions
+    // Fix status check - Control-plane sends 'completed', not 'SUCCESS'
     const successfulQueries = queryMetrics.filter(m => 
-      m.data?.status === 'SUCCESS'
+      m.data?.status === 'completed' || m.data?.status === 'SUCCESS'
     )
     const tps = successfulQueries.length / 60
+    
+    console.log('✅ Successful queries:', successfulQueries.length)
     
     const newMetrics = {
       qps: Math.round(qps * 100) / 100,
@@ -344,6 +360,7 @@ export default function Dashboard() {
     }
     
     console.log('🎯 Calculated new aggregated metrics:', newMetrics)
+    console.log('🔄 Setting aggregated metrics state...')
     setAggregatedMetrics(newMetrics)
   }
 

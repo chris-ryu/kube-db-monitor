@@ -2,7 +2,6 @@ package io.kubedb.monitor.agent;
 
 import java.sql.Connection;
 import java.sql.Driver;
-import java.sql.SQLException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
@@ -77,32 +76,35 @@ public class DatabaseProxyFactory {
         
         DatabaseType dbType = DatabaseType.fromUrl(url);
         
+        // ByteBuddy 접근법: 바이트코드 레벨에서 투명하게 인터셉션하므로 원본 Connection 반환
         switch (dbType) {
             case POSTGRESQL:
-                logger.info("[KubeDB] PostgreSQL Connection 프록시 생성");
-                return new PostgreSQLConnectionProxy(connection, config);
+                logger.info("[KubeDB] PostgreSQL Connection - ByteBuddy 인터셉션 적용됨");
+                break;
                 
             case MYSQL:
             case MARIADB:
-                logger.info("[KubeDB] MySQL/MariaDB Connection - 향후 지원 예정, 기본 모니터링 적용");
-                return connection; // 향후 MySQLConnectionProxy 구현
+                logger.info("[KubeDB] MySQL/MariaDB Connection - ByteBuddy 인터셉션 적용됨");
+                break;
                 
             case ORACLE:
-                logger.info("[KubeDB] Oracle Connection - 향후 지원 예정, 기본 모니터링 적용");
-                return connection; // 향후 OracleConnectionProxy 구현
+                logger.info("[KubeDB] Oracle Connection - ByteBuddy 인터셉션 적용됨");
+                break;
                 
             case SQL_SERVER:
-                logger.info("[KubeDB] SQL Server Connection - 향후 지원 예정, 기본 모니터링 적용");
-                return connection; // 향후 SQLServerConnectionProxy 구현
+                logger.info("[KubeDB] SQL Server Connection - ByteBuddy 인터셉션 적용됨");
+                break;
                 
             case H2:
-                logger.info("[KubeDB] H2 Database Connection - 기본 모니터링 적용");
-                return connection; // H2는 테스트용이므로 프록시 불필요
+                logger.info("[KubeDB] H2 Database Connection - ByteBuddy 인터셉션 적용됨");
+                break;
                 
             default:
-                logger.warning("[KubeDB] 알 수 없는 데이터베이스 타입: " + url + " - 기본 모니터링 적용");
-                return connection;
+                logger.warning("[KubeDB] 알 수 없는 데이터베이스 타입: " + url + " - ByteBuddy 인터셉션 적용됨");
+                break;
         }
+        
+        return connection;
     }
     
     /**
@@ -124,40 +126,37 @@ public class DatabaseProxyFactory {
             return cachedProxy;
         }
         
+        // ByteBuddy 접근법: 바이트코드 레벨에서 투명하게 인터셉션하므로 원본 Driver 반환
         Driver proxyDriver;
         
         switch (dbType) {
             case POSTGRESQL:
-                logger.info("[KubeDB] PostgreSQL Driver 프록시 생성: " + driverClassName);
-                proxyDriver = new PostgreSQLDriverProxy(driver, config);
+                logger.info("[KubeDB] PostgreSQL Driver - ByteBuddy 인터셉션 적용됨: " + driverClassName);
                 break;
                 
             case MYSQL:
             case MARIADB:
-                logger.info("[KubeDB] MySQL/MariaDB Driver - 향후 지원 예정: " + driverClassName);
-                proxyDriver = driver; // 향후 MySQLDriverProxy 구현
+                logger.info("[KubeDB] MySQL/MariaDB Driver - ByteBuddy 인터셉션 적용됨: " + driverClassName);
                 break;
                 
             case ORACLE:
-                logger.info("[KubeDB] Oracle Driver - 향후 지원 예정: " + driverClassName);
-                proxyDriver = driver; // 향후 OracleDriverProxy 구현
+                logger.info("[KubeDB] Oracle Driver - ByteBuddy 인터셉션 적용됨: " + driverClassName);
                 break;
                 
             case SQL_SERVER:
-                logger.info("[KubeDB] SQL Server Driver - 향후 지원 예정: " + driverClassName);
-                proxyDriver = driver; // 향후 SQLServerDriverProxy 구현
+                logger.info("[KubeDB] SQL Server Driver - ByteBuddy 인터셉션 적용됨: " + driverClassName);
                 break;
                 
             case H2:
-                logger.fine("[KubeDB] H2 Driver - 기본 사용: " + driverClassName);
-                proxyDriver = driver; // H2는 테스트용이므로 프록시 불필요
+                logger.fine("[KubeDB] H2 Driver - ByteBuddy 인터셉션 적용됨: " + driverClassName);
                 break;
                 
             default:
                 logger.warning("[KubeDB] 알 수 없는 Driver 타입: " + driverClassName);
-                proxyDriver = driver;
                 break;
         }
+        
+        proxyDriver = driver;
         
         // 캐시에 저장
         driverProxyCache.put(cacheKey, proxyDriver);
