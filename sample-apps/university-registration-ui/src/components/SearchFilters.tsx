@@ -100,7 +100,7 @@ export default function SearchFilters({ onSearch, loading = false }: SearchFilte
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2 text-gray-700"
           >
             <Filter size={20} />
             상세검색

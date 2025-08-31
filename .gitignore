@@ -285,3 +285,4 @@ test-*.ts
 
 # Claude assistant temporary files
 .claude/settings.local.json
+*.jtl

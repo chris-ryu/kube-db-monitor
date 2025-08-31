@@ -1,0 +1,158 @@
+# Azure Load Testing 설정 파일
+# University Registration 시스템 성능 테스트용
+
+version: v0.1
+testId: university-registration-load-test
+displayName: University Registration Performance Test
+description: |
+  KubeDB Monitor 데모용 수강신청 시스템 성능 테스트
+  
+  📊 테스트 목적:
+  - 실시간 DB 모니터링 기능 시연
+  - 수강신청 동시성 처리 성능 측정  
+  - 시스템 병목점 및 한계점 파악
+  
+  🎯 시나리오:
+  1. Warmup (50 users, 2분) - 시스템 안정성 확인
+  2. Peak (200 users, 5분) - 수강신청 러시 상황
+  3. Stress (500 users, 3분) - 극한 부하 테스트
+
+# 테스트 엔진 설정
+testPlan:
+  testScript: university-load-test.jmx
+  configurationFiles:
+    - test-data/students.csv
+    - test-data/courses.csv  
+    - test-data/scenarios.csv
+  
+# 부하 설정
+loadTestConfiguration:
+  engineInstances: 2
+  splitAllCSVs: true
+  
+# 환경 변수
+env:
+  - name: BASE_URL
+    value: https://university-registration.bitgaram.info
+  - name: SCENARIO
+    value: peak
+  - name: USERS
+    value: "200"
+  - name: DURATION
+    value: "300"
+  - name: RAMP_UP
+    value: "60"
+
+# 테스트 시나리오별 설정
+scenarios:
+  warmup:
+    description: "평상시 - 시스템 안정성 확인"
+    users: 50
+    duration: 120  # 2분
+    rampUp: 30
+    expectedTPS: 25
+    expectedResponseTime: 1000
+    errorThreshold: 1
+    
+  peak:
+    description: "수강신청 러시 - 실제 상황 시뮬레이션"  
+    users: 200
+    duration: 300  # 5분
+    rampUp: 60
+    expectedTPS: 80
+    expectedResponseTime: 3000
+    errorThreshold: 5
+    
+  stress:
+    description: "극한 부하 - 시스템 한계 테스트"
+    users: 500
+    duration: 180  # 3분
+    rampUp: 30
+    expectedTPS: 120
+    expectedResponseTime: 8000
+    errorThreshold: 20
+
+# 성능 기준선 설정
+passCriteria:
+  passPercentage: 90
+  
+  # 응답 시간 기준
+  responseTimes:
+    - avg: 5000ms
+    - p95: 8000ms
+    - p99: 15000ms
+      
+  # 처리량 기준  
+  throughput:
+    requests_per_second: 50
+    
+  # 에러율 기준
+  error_rate: 10%
+
+# 모니터링 설정
+monitoring:
+  # Azure Monitor 연동
+  azureMonitor:
+    enabled: true
+    resourceIds:
+      - /subscriptions/{subscription}/resourceGroups/kubedb-monitor-demo/providers/Microsoft.Web/sites/university-registration
+      
+  # 커스텀 메트릭
+  customMetrics:
+    - name: "DB Connection Pool"
+      query: "database_connections_active"
+      threshold: 80
+      
+    - name: "Query Response Time"  
+      query: "database_query_duration_avg"
+      threshold: 5000
+      
+    - name: "Deadlock Count"
+      query: "database_deadlocks_total"
+      threshold: 5
+
+# 알림 설정
+notifications:
+  webhooks:
+    - url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+      events: ["test-started", "test-completed", "test-failed"]
+      
+  email:
+    recipients:
+      - "devops@company.com"
+      - "dev-team@company.com"
+    events: ["test-completed", "test-failed"]
+
+# 결과 저장 설정
+artifacts:
+  outputArtifacts:
+    resultFileInfo:
+      outputType: JTL
+    
+  inputArtifacts:
+    testScriptFileInfo:
+      name: university-load-test.jmx
+    additionalFileInfo:
+      - name: students.csv
+        type: csv
+      - name: courses.csv  
+        type: csv
+      - name: scenarios.csv
+        type: csv
+
+# 고급 설정
+engineInstances: 2
+splitAllCSVs: true
+quickTest: false
+regionalLoadTest: false
+
+# 리소스 그룹 및 위치
+resourceGroup: kubedb-monitor-demo
+location: koreacentral
+
+# 태그
+tags:
+  Environment: Demo
+  Project: KubeDB-Monitor
+  TestType: Performance
+  Application: UniversityRegistration

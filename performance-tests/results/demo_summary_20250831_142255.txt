@@ -1,0 +1,34 @@
+🎓 University Registration Performance Test Summary
+================================================
+
+📅 테스트 일시: 2025-08-31 14:22:55
+🎯 테스트 목적: KubeDB Monitor 실시간 모니터링 데모
+
+📊 실행된 시나리오:
+1. Warmup (5 users, 3회) - 시스템 안정성 확인
+2. Peak (20 users, 5회) - 수강신청 러시 상황  
+3. Stress (50 users, 3회) - 극한 부하 테스트
+
+📁 결과 파일:
+-rw-r--r--   1 narzis  staff    163 Aug 31 08:38 simple-test-results.jtl
+-rw-r--r--   1 narzis  staff    163 Aug 31 08:38 simple-test.jtl
+-rw-r--r--   1 narzis  staff  71059 Aug 31 14:22 stress_20250831_142227.jtl
+-rw-r--r--   1 narzis  staff    163 Aug 31 08:36 summary-2025-08-31_08-36-39.jtl
+-rw-r--r--   1 narzis  staff    163 Aug 31 08:36 summary-2025-08-31_08-36-53.jtl
+-rw-r--r--   1 narzis  staff    163 Aug 31 08:38 summary-2025-08-31_08-38-00.jtl
+-rw-r--r--   1 narzis  staff    163 Aug 31 08:38 test.jtl
+-rw-r--r--   1 narzis  staff    163 Aug 31 08:36 warmup_20250831_083633.jtl
+-rw-r--r--   1 narzis  staff   7133 Aug 31 14:20 warmup_20250831_142007.jtl
+-rw-r--r--   1 narzis  staff   7137 Aug 31 14:21 warmup_20250831_142131.jtl
+
+🔗 관련 링크:
+- KubeDB Monitor: https://kube-db-mon-dashboard.bitgaram.info
+- 테스트 대상: https://university-registration.bitgaram.info
+- GitHub: https://github.com/kubedb-monitor/kubedb-monitor
+
+💡 데모 포인트:
+✅ 실시간 DB 모니터링 및 알림
+✅ 쿼리 성능 분석 및 최적화 제안
+✅ 동시성 제어 및 데드락 감지
+✅ 자동화된 성능 임계값 관리
+

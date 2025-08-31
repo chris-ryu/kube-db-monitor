@@ -1,0 +1,6 @@
+scenario,description,users,duration,rampup,expectedTPS,expectedRT,errorThreshold
+warmup,평상시 - 시스템 안정성 확인,50,120,30,25,1000,1
+peak,수강신청 러시 - 실제 상황 시뮬레이션,200,300,60,80,3000,5
+stress,극한 부하 - 시스템 한계 테스트,500,180,30,120,8000,20
+endurance,지속성 테스트 - 장기간 안정성,100,1800,120,40,2000,3
+spike,급작스런 부하 증가,300,60,10,100,5000,15

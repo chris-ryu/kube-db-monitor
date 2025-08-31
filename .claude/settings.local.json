@@ -191,7 +191,8 @@
       "Bash(ResultSetTransformer.java )",
       "Bash(PostgreSQLDriverProxy.java)",
       "Bash(./scripts/long-running-test-bytebuddy.sh:*)",
-      "Bash(./scripts/realtime-transaction-test.sh:*)"
+      "Bash(./scripts/realtime-transaction-test.sh:*)",
+      "Bash(jmeter:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",
