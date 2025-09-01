@@ -1,5 +1,6 @@
 package io.kubedb.monitor.agent;
 
+import io.kubedb.monitor.agent.pool.PoolMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,13 +42,20 @@ public class HttpMetricsTransmitter {
      * 쿼리 메트릭을 비동기로 전송
      */
     public void transmitQueryMetric(String sql, long executionTimeMs, String connectionId, String threadName) {
+        transmitQueryMetric(sql, executionTimeMs, connectionId, threadName, null);
+    }
+    
+    /**
+     * 쿼리 메트릭을 시스템 메트릭과 함께 비동기로 전송
+     */
+    public void transmitQueryMetric(String sql, long executionTimeMs, String connectionId, String threadName, PoolMetrics poolMetrics) {
         if (!shouldTransmit()) {
             return;
         }
         
         executor.submit(() -> {
             try {
-                String json = createQueryMetricJson(sql, executionTimeMs, connectionId, threadName);
+                String json = createQueryMetricJson(sql, executionTimeMs, connectionId, threadName, poolMetrics);
                 sendHttpPost(json);
                 logger.debug("[KubeDB] Query metric transmitted: {} ms", executionTimeMs);
             } catch (Exception e) {
@@ -95,6 +103,25 @@ public class HttpMetricsTransmitter {
     }
     
     /**
+     * 시스템 메트릭만 별도로 전송 (주기적 전송용)
+     */
+    public void transmitSystemMetrics(PoolMetrics poolMetrics) {
+        if (!shouldTransmit() || poolMetrics == null) {
+            return;
+        }
+        
+        executor.submit(() -> {
+            try {
+                String json = createSystemMetricJson(poolMetrics);
+                sendHttpPost(json);
+                logger.debug("[KubeDB] System metrics transmitted: {}", poolMetrics.getPoolType().getDisplayName());
+            } catch (Exception e) {
+                logger.warn("[KubeDB] Failed to transmit system metrics: {}", e.getMessage());
+            }
+        });
+    }
+    
+    /**
      * 전송할지 여부를 샘플링 레이트에 따라 결정
      */
     private boolean shouldTransmit() {
@@ -124,12 +151,40 @@ public class HttpMetricsTransmitter {
      * 쿼리 메트릭 JSON 생성
      */
     private String createQueryMetricJson(String sql, long executionTimeMs, String connectionId, String threadName) {
+        return createQueryMetricJson(sql, executionTimeMs, connectionId, threadName, null);
+    }
+    
+    /**
+     * 쿼리 메트릭 JSON 생성 (시스템 메트릭 포함)
+     */
+    private String createQueryMetricJson(String sql, long executionTimeMs, String connectionId, String threadName, PoolMetrics poolMetrics) {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z";
         String sqlType = extractSqlType(sql);
         String queryId = "query-" + System.nanoTime();
         
         // SQL에서 민감한 정보 마스킹
         String maskedSql = config.isMaskSqlParams() ? maskSqlParameters(sql) : sql;
+        
+        // 시스템 메트릭 JSON 부분 생성
+        String metricsJson = "";
+        if (poolMetrics != null && poolMetrics.getPoolType().name() != "UNKNOWN") {
+            metricsJson = String.format(
+                ",\"metrics\": {" +
+                    "\"connection_pool_active\": %d," +
+                    "\"connection_pool_idle\": %d," +
+                    "\"connection_pool_max\": %d," +
+                    "\"connection_pool_usage_ratio\": %.3f," +
+                    "\"pool_type\": \"%s\"," +
+                    "\"pool_name\": \"%s\"" +
+                "}",
+                poolMetrics.getActiveConnections(),
+                poolMetrics.getIdleConnections(),
+                poolMetrics.getMaxConnections(),
+                poolMetrics.getConnectionUsageRatio(),
+                poolMetrics.getPoolType().getDisplayName(),
+                poolMetrics.getPoolName()
+            );
+        }
         
         return String.format(
             "{" +
@@ -146,6 +201,7 @@ public class HttpMetricsTransmitter {
                 "\"thread_name\": \"%s\"," +
                 "\"status\": \"completed\"" +
             "}" +
+            "%s" + // 시스템 메트릭 부분
             "}",
             timestamp,
             getPodName(),
@@ -155,7 +211,8 @@ public class HttpMetricsTransmitter {
             maskedSql.replace("\"", "\\\"").replace("\n", "\\n"),
             executionTimeMs,
             connectionId,
-            threadName
+            threadName,
+            metricsJson
         );
     }
     
@@ -226,6 +283,41 @@ public class HttpMetricsTransmitter {
             durationMs,
             threadName,
             startTime
+        );
+    }
+    
+    /**
+     * 시스템 메트릭 전용 JSON 생성
+     */
+    private String createSystemMetricJson(PoolMetrics poolMetrics) {
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z";
+        
+        return String.format(
+            "{" +
+            "\"timestamp\": \"%s\"," +
+            "\"event_type\": \"system_metrics\"," +
+            "\"pod_name\": \"%s\"," +
+            "\"namespace\": \"%s\"," +
+            "\"metrics\": {" +
+                "\"connection_pool_active\": %d," +
+                "\"connection_pool_idle\": %d," +
+                "\"connection_pool_max\": %d," +
+                "\"connection_pool_usage_ratio\": %.3f," +
+                "\"pool_type\": \"%s\"," +
+                "\"pool_name\": \"%s\"," +
+                "\"total_connections\": %d" +
+            "}" +
+            "}",
+            timestamp,
+            getPodName(),
+            getNamespace(),
+            poolMetrics.getActiveConnections(),
+            poolMetrics.getIdleConnections(),
+            poolMetrics.getMaxConnections(),
+            poolMetrics.getConnectionUsageRatio(),
+            poolMetrics.getPoolType().getDisplayName(),
+            poolMetrics.getPoolName(),
+            poolMetrics.getTotalConnections()
         );
     }
     

@@ -129,12 +129,22 @@ export interface WebSocketMessage {
 // 대시보드에서 사용할 집계된 메트릭 타입들
 export interface AggregatedMetrics {
   qps: number // Queries Per Second
+  tps?: number // Transactions Per Second
   avg_latency: number // Average latency in ms
+  avgLatency?: number // camelCase version for consistency
   error_rate: number // Error rate as percentage
+  transactionCount?: number // Total transaction count in time window
   active_connections: number
+  activeConnections?: number // camelCase version
+  idle_connections: number
+  idleConnections?: number // camelCase version
   max_connections: number
+  maxConnections?: number // camelCase version
+  pool_usage_ratio: number
+  poolUsageRatio?: number // camelCase version
   heap_usage_ratio: number
   cpu_usage_ratio: number
+  pool_type?: string
 }
 
 export interface QueryTypeStats {

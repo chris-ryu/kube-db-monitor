@@ -113,3 +113,5 @@ make demo-deadlock # 데드락 시뮬레이션
 - ✅ **PostgreSQL 호환성 완전 해결**: "Unknown Types value" 오류 해결
 - ✅ **투명한 모니터링**: 애플리케이션 코드 변경 불필요
 - ✅ **Spring Boot 완전 지원**: Fat JAR 환경 안정적 동작
+
+kubernetes

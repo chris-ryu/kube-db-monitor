@@ -230,6 +230,10 @@ public class RuntimeDataSourceDiscovery {
                 System.out.println("✅ DataSource 프록시로 교체 완료: " + field.getName());
             }
             
+            // Connection Pool 모니터링을 위해 원본 DataSource를 등록
+            metricsCollector.registerDataSource(originalDataSource);
+            System.out.println("🔗 DataSource가 Connection Pool 모니터링에 등록됨: " + originalDataSource.getClass().getSimpleName());
+            
             processedDataSources.add(originalDataSource);
             
         } catch (Exception e) {

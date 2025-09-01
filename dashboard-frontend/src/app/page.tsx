@@ -13,9 +13,13 @@ interface AggregatedMetrics {
   qps: number
   avgLatency: number
   activeConnections: number
+  idleConnections: number
+  maxConnections: number
+  poolUsageRatio: number
   errorRate: number
   transactionCount: number
   tps: number // Transactions Per Second
+  poolType?: string
 }
 
 export default function Dashboard() {
@@ -33,6 +37,9 @@ export default function Dashboard() {
     qps: 0,
     avgLatency: 0,
     activeConnections: 0,
+    idleConnections: 0,
+    maxConnections: 0,
+    poolUsageRatio: 0,
     errorRate: 0,
     transactionCount: 0,
     tps: 0
@@ -340,6 +347,9 @@ export default function Dashboard() {
     
     const latestMetric = updatedMetrics.find(m => m.metrics)
     const activeConnections = latestMetric?.metrics?.connection_pool_active ?? 0
+    const idleConnections = latestMetric?.metrics?.connection_pool_idle ?? 0
+    const maxConnections = latestMetric?.metrics?.connection_pool_max ?? 0
+    const poolUsageRatio = latestMetric?.metrics?.connection_pool_usage_ratio ?? 0
     
     // Calculate transactions per second based on query metrics
     // Fix status check - Control-plane sends 'completed', not 'SUCCESS'
@@ -354,6 +364,9 @@ export default function Dashboard() {
       qps: Math.round(qps * 100) / 100,
       avgLatency: Math.round(avgLatency * 100) / 100,
       activeConnections,
+      idleConnections,
+      maxConnections,
+      poolUsageRatio: Math.round(poolUsageRatio * 100) / 100,
       errorRate: Math.round(errorRate * 100) / 100,
       transactionCount: Math.max(0, Math.floor(queryMetrics.length / 10)), // Simulate active transactions based on recent query activity
       tps: Math.round(tps * 100) / 100
@@ -472,8 +485,8 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Enhanced Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-8">
+        {/* Primary Metrics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
           <MetricCard
             title="QPS"
             value={aggregatedMetrics.qps.toString()}
@@ -495,7 +508,7 @@ export default function Dashboard() {
           <MetricCard
             title="Active Connections"
             value={aggregatedMetrics.activeConnections.toString()}
-            unit="connections"
+            unit="active"
             isAnimated={isConnected}
           />
           <MetricCard
@@ -510,6 +523,39 @@ export default function Dashboard() {
             unit="%"
             isAnimated={isConnected}
           />
+        </div>
+
+        {/* Connection Pool Metrics */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold mb-4 text-green-400">
+            🏊 Connection Pool Status
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard
+              title="Active Connections"
+              value={aggregatedMetrics.activeConnections.toString()}
+              unit="connections"
+              isAnimated={isConnected}
+            />
+            <MetricCard
+              title="Idle Connections" 
+              value={aggregatedMetrics.idleConnections.toString()}
+              unit="connections"
+              isAnimated={isConnected}
+            />
+            <MetricCard
+              title="Max Pool Size"
+              value={aggregatedMetrics.maxConnections.toString()}
+              unit="connections"
+              isAnimated={isConnected}
+            />
+            <MetricCard
+              title="Pool Usage"
+              value={`${aggregatedMetrics.poolUsageRatio}%`}
+              unit={`(${aggregatedMetrics.activeConnections + aggregatedMetrics.idleConnections}/${aggregatedMetrics.maxConnections})`}
+              isAnimated={isConnected}
+            />
+          </div>
         </div>
 
         {/* Alert Panels */}

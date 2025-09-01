@@ -532,30 +532,30 @@ version: ## 현재 버전 정보 표시
 	@echo "이미지 태그: $(IMAGE_TAG)"
 	@echo "프로젝트 경로: $(PROJECT_ROOT)"
 
-##@ 빌드 편의 명령어 (build-images.sh 스타일)
-build-and-deploy-all: ## 모든 컴포넌트 빌드, 푸시, 배포 (build-images.sh all과 동등)
-	@echo "$(BLUE)🚀 전체 빌드 및 배포 시작$(RESET)"
-	@$(MAKE) PUSH_IMAGES="true" REDEPLOY_AFTER_BUILD="true" build-all-force
+##@ 빌드 편의 명령어 (build-images.sh 통합)
+build-and-deploy-all: ## 모든 컴포넌트 빌드, 푸시, 배포 (build-images.sh all 호출)
+	@echo "$(BLUE)🚀 전체 빌드 및 배포 시작 (build-images.sh 스크립트 호출)$(RESET)"
+	@$(SCRIPTS_DIR)/build-images.sh all --push
 	@echo "$(GREEN)🎉 전체 빌드 및 배포 완료!$(RESET)"
 
-build-and-deploy-agent: ## Agent만 빌드, 푸시, 배포 (build-images.sh agent와 동등)
-	@echo "$(BLUE)🤖 Agent 빌드 및 배포 시작$(RESET)"
-	@$(MAKE) PUSH_IMAGES="true" REDEPLOY_AFTER_BUILD="true" build-agent
+build-and-deploy-agent: ## Agent만 빌드, 푸시, 배포 (build-images.sh agent 호출)
+	@echo "$(BLUE)🤖 Agent 빌드 및 배포 시작 (build-images.sh 스크립트 호출)$(RESET)"
+	@$(SCRIPTS_DIR)/build-images.sh agent --push
 	@echo "$(GREEN)✅ Agent 빌드 및 배포 완료$(RESET)"
 
-build-and-deploy-control-plane: ## Control Plane만 빌드, 푸시, 배포
-	@echo "$(BLUE)🎛️ Control Plane 빌드 및 배포 시작$(RESET)"
-	@$(MAKE) PUSH_IMAGES="true" REDEPLOY_AFTER_BUILD="true" build-control-plane
+build-and-deploy-control-plane: ## Control Plane만 빌드, 푸시, 배포 (build-images.sh 호출)
+	@echo "$(BLUE)🎛️ Control Plane 빌드 및 배포 시작 (build-images.sh 스크립트 호출)$(RESET)"
+	@$(SCRIPTS_DIR)/build-images.sh control-plane --push
 	@echo "$(GREEN)✅ Control Plane 빌드 및 배포 완료$(RESET)"
 
-build-and-deploy-dashboard: ## Dashboard만 빌드, 푸시, 배포
-	@echo "$(BLUE)📊 Dashboard 빌드 및 배포 시작$(RESET)"
-	@$(MAKE) PUSH_IMAGES="true" REDEPLOY_AFTER_BUILD="true" build-dashboard
+build-and-deploy-dashboard: ## Dashboard만 빌드, 푸시, 배포 (build-images.sh 호출)
+	@echo "$(BLUE)📊 Dashboard 빌드 및 배포 시작 (build-images.sh 스크립트 호출)$(RESET)"
+	@$(SCRIPTS_DIR)/build-images.sh dashboard --push
 	@echo "$(GREEN)✅ Dashboard 빌드 및 배포 완료$(RESET)"
 
-build-and-deploy-university: ## University App만 빌드, 푸시, 배포
-	@echo "$(BLUE)🎓 University App 빌드 및 배포 시작$(RESET)"
-	@$(MAKE) PUSH_IMAGES="true" REDEPLOY_AFTER_BUILD="true" build-university-app
+build-and-deploy-university: ## University App만 빌드, 푸시, 배포 (build-images.sh 호출)
+	@echo "$(BLUE)🎓 University App 빌드 및 배포 시작 (build-images.sh 스크립트 호출)$(RESET)"
+	@$(SCRIPTS_DIR)/build-images.sh university-app --push
 	@echo "$(GREEN)✅ University App 빌드 및 배포 완료$(RESET)"
 
 ##@ CI/CD

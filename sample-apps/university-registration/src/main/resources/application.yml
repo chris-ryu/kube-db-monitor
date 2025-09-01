@@ -16,6 +16,7 @@ spring:
       max-lifetime: 1800000
       pool-name: CourseRegistrationCP
       auto-commit: false
+      register-mbeans: true  # MXBean 등록 활성화
       
   # JPA Configuration
   jpa:
@@ -174,6 +175,7 @@ spring:
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000
+      register-mbeans: true  # MXBean 등록 활성화
       
   jpa:
     show-sql: true

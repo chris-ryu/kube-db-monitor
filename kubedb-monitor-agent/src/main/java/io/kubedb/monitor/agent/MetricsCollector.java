@@ -1,5 +1,9 @@
 package io.kubedb.monitor.agent;
 
+import io.kubedb.monitor.agent.pool.ConnectionPoolMonitor;
+import io.kubedb.monitor.agent.pool.PoolMetrics;
+
+import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
@@ -7,6 +11,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+
+import io.kubedb.monitor.agent.pool.ConnectionPoolMonitor;
+import io.kubedb.monitor.agent.pool.PoolMetrics;
 import java.util.Map;
 
 /**
@@ -20,6 +27,7 @@ public class MetricsCollector {
     
     private final AgentConfig config;
     private final HttpMetricsTransmitter transmitter;
+    private final ConnectionPoolMonitor poolMonitor;
     
     // 기본 메트릭스 카운터들
     private final AtomicLong queryCount = new AtomicLong(0);
@@ -28,8 +36,7 @@ public class MetricsCollector {
     private final AtomicLong errorCount = new AtomicLong(0);
     private final AtomicLong connectionCloseCount = new AtomicLong(0);
     
-    // 성능 메트릭스
-    private volatile long totalQueryTime = 0;
+    // 성능 메트릭스  
     private volatile long maxQueryTime = 0;
     
     // Long-running transaction 추적
@@ -45,11 +52,18 @@ public class MetricsCollector {
     public MetricsCollector(AgentConfig config) {
         this.config = config;
         this.transmitter = new HttpMetricsTransmitter(config);
+        this.poolMonitor = new ConnectionPoolMonitor(5); // 5초 간격으로 Pool 메트릭 수집
         
         // Long-running transaction 모니터링 스케줄러 시작 (5초마다 체크)
         transactionMonitor.scheduleAtFixedRate(this::checkLongRunningTransactions, 5, 5, TimeUnit.SECONDS);
         
-        logger.info("[KubeDB] MetricsCollector 초기화됨 (Proxy Mode with HTTP transmission and Long-running transaction monitoring)");
+        // Connection Pool 메트릭 주기적 전송 (10초마다)
+        transactionMonitor.scheduleAtFixedRate(this::sendConnectionPoolMetrics, 10, 10, TimeUnit.SECONDS);
+        
+        // Connection Pool 모니터링 시작
+        poolMonitor.start();
+        
+        logger.info("[KubeDB] MetricsCollector 초기화됨 (Proxy Mode with HTTP transmission, Long-running transaction monitoring, and Connection Pool monitoring)");
     }
     
     /**
@@ -70,14 +84,14 @@ public class MetricsCollector {
         queryCount.incrementAndGet();
         
         long executionTimeMs = executionTimeNanos / 1_000_000;
-        totalQueryTime += executionTimeMs;
         
         if (executionTimeMs > maxQueryTime) {
             maxQueryTime = executionTimeMs;
         }
         
-        // HTTP 전송
-        transmitter.transmitQueryMetric(sql, executionTimeMs, connectionId, threadName);
+        // HTTP 전송 (Connection Pool 메트릭 포함)
+        PoolMetrics poolMetrics = poolMonitor.getLatestMetrics();
+        transmitter.transmitQueryMetric(sql, executionTimeMs, connectionId, threadName, poolMetrics);
         
         // 느린 쿼리 감지
         if (executionTimeMs > config.getSlowQueryThresholdMs()) {
@@ -254,7 +268,6 @@ public class MetricsCollector {
             rollbackCount.get(),
             errorCount.get(),
             connectionCloseCount.get(),
-            totalQueryTime,
             maxQueryTime
         );
     }
@@ -268,27 +281,25 @@ public class MetricsCollector {
         public final long rollbackCount;
         public final long errorCount;
         public final long connectionCloseCount;
-        public final long totalQueryTime;
         public final long maxQueryTime;
         
         public MetricsSnapshot(long queryCount, long commitCount, long rollbackCount, 
                               long errorCount, long connectionCloseCount, 
-                              long totalQueryTime, long maxQueryTime) {
+                              long maxQueryTime) {
             this.queryCount = queryCount;
             this.commitCount = commitCount;
             this.rollbackCount = rollbackCount;
             this.errorCount = errorCount;
             this.connectionCloseCount = connectionCloseCount;
-            this.totalQueryTime = totalQueryTime;
             this.maxQueryTime = maxQueryTime;
         }
         
         @Override
         public String toString() {
             return String.format("MetricsSnapshot{queries=%d, commits=%d, rollbacks=%d, errors=%d, " +
-                               "connectionsClosed=%d, totalQueryTime=%dms, maxQueryTime=%dms}",
+                               "connectionsClosed=%d, maxQueryTime=%dms}",
                                queryCount, commitCount, rollbackCount, errorCount, 
-                               connectionCloseCount, totalQueryTime, maxQueryTime);
+                               connectionCloseCount, maxQueryTime);
         }
     }
     
@@ -346,7 +357,41 @@ public class MetricsCollector {
         }
         
         activeTransactions.clear();
+        
+        // Connection Pool 모니터링 중지
+        if (poolMonitor != null) {
+            poolMonitor.stop();
+        }
+        
         logger.info("[KubeDB] MetricsCollector shutdown completed");
+    }
+    
+    /**
+     * 새로운 DataSource 등록 (JDBC 인터셉터에서 발견 시 사용)
+     */
+    public void registerDataSource(DataSource dataSource) {
+        if (poolMonitor != null) {
+            poolMonitor.registerDataSource(dataSource);
+        }
+    }
+    
+    /**
+     * Connection Pool 메트릭을 HTTP로 전송
+     */
+    private void sendConnectionPoolMetrics() {
+        try {
+            if (poolMonitor != null && transmitter != null) {
+                PoolMetrics latestMetrics = poolMonitor.getLatestMetrics();
+                if (latestMetrics != null && !latestMetrics.isEmpty()) {
+                    transmitter.transmitSystemMetrics(latestMetrics);
+                    logger.info(String.format("[KubeDB] 📊 Connection Pool 메트릭 전송: %s", latestMetrics));
+                } else {
+                    logger.fine("[KubeDB] Connection Pool 메트릭이 없거나 비어있음");
+                }
+            }
+        } catch (Exception e) {
+            logger.warning("[KubeDB] Connection Pool 메트릭 전송 실패: " + e.getMessage());
+        }
     }
     
     /**

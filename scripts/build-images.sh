@@ -165,7 +165,7 @@ build_dashboard() {
     if [[ -d "kubedb-monitor-dashboard" ]]; then
         build_docker_image "kubedb-monitor-dashboard/Dockerfile" "$REGISTRY/kubedb-monitor/dashboard:$IMAGE_TAG" "./kubedb-monitor-dashboard"
     elif [[ -d "dashboard-frontend" ]]; then
-        build_docker_image "dashboard-frontend/Dockerfile" "$REGISTRY/kubedb-monitor/dashboard-frontend:$IMAGE_TAG" "./dashboard-frontend"
+        build_docker_image "dashboard-frontend/Dockerfile" "$REGISTRY/kubedb-monitor/dashboard:$IMAGE_TAG" "./dashboard-frontend"
     else
         log_warning "Dashboard 디렉터리를 찾을 수 없습니다."
     fi

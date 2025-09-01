@@ -18,7 +18,7 @@ spec:
         # KubeDB Monitor 활성화 - PostgreSQL 설정 (안전 모드)
         kubedb.monitor/enable: "true"
         kubedb.monitor/db-types: "postgresql"
-        kubedb.monitor/sampling-rate: "0.1"
+        kubedb.monitor/sampling-rate: "1.0"
         kubedb.monitor/slow-query-threshold: "100"
         kubedb.monitor/collector-type: "http"
         kubedb.monitor/log-level: "WARN"
@@ -57,7 +57,7 @@ spec:
           value: "development"
         # Java 옵션과 KubeDB Agent (안전 모드)
         - name: JAVA_OPTS
-          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=postgresql,sampling-rate=0.1,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=WARN,postgresql-fix-unknown-types-value=true,postgresql-strict-compatibility=true,safe-transformation-mode=true"
+          value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=postgresql,sampling-rate=1.0,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=WARN,postgresql-fix-unknown-types-value=true,postgresql-strict-compatibility=true,safe-transformation-mode=true"
         
         # PostgreSQL 연결 설정 (이전에 작동했던 설정)
         - name: SPRING_DATASOURCE_JDBC_URL

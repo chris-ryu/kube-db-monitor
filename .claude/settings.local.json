@@ -192,7 +192,14 @@
       "Bash(PostgreSQLDriverProxy.java)",
       "Bash(./scripts/long-running-test-bytebuddy.sh:*)",
       "Bash(./scripts/realtime-transaction-test.sh:*)",
-      "Bash(jmeter:*)"
+      "Bash(jmeter:*)",
+      "Bash(/tmp/metrics-validation-test.sh:*)",
+      "Bash(do kubectl exec university-registration-demo-548579546c-447lx -n kubedb-monitor-test -- curl -s http://localhost:8080/api/courses)",
+      "WebSearch",
+      "Bash(do kubectl exec university-registration-demo-548579546c-w8fx6 -n kubedb-monitor-test -- curl -s http://localhost:8080/api/courses)",
+      "Bash(/tmp/bytebuddy-interception-test.sh:*)",
+      "Bash(do kubectl exec university-registration-demo-548579546c-5rwkb -n kubedb-monitor-test -- curl -s \"http://localhost:8080/api/courses/CS00$i\")",
+      "Bash(/tmp/detailed-metrics-analysis.sh:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

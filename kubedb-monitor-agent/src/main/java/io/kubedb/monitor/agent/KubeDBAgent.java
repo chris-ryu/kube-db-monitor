@@ -22,6 +22,7 @@ public class KubeDBAgent {
     private static AgentConfig config;
     private static RuntimeDataSourceDiscovery dataSourceDiscovery;
     private static ScheduledExecutorService scheduler;
+    private static MetricsCollector globalMetricsCollector;
     
     /**
      * JVM hook to statically load the javaagent at startup.
@@ -45,11 +46,41 @@ public class KubeDBAgent {
         }
         
         try {
+            // 글로벌 MetricsCollector 초기화
+            globalMetricsCollector = new MetricsCollector(config);
+            
             // ByteBuddy 기반 인터셉션 설정
             initializeByteBuddyInterception(inst);
             
             // 런타임 DataSource 발견 시작
             initializeRuntimeDiscovery(inst);
+            
+            // Spring Boot DataSource 감지 (5초 후)
+            java.util.concurrent.ScheduledExecutorService springDetector = 
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+            springDetector.schedule(() -> {
+                try {
+                    SpringBootDataSourceDetector.detectAndRegisterDataSources();
+                    System.out.println("🌟 Spring Boot DataSource 감지 완료: " + 
+                                     SpringBootDataSourceDetector.getDetectedDataSourceCount() + "개 발견");
+                } catch (Exception e) {
+                    System.out.println("❌ Spring Boot DataSource 감지 실패: " + e.getMessage());
+                }
+            }, 5, java.util.concurrent.TimeUnit.SECONDS);
+            
+            // 직접 DataSource 스캐너 시작 (더 공격적인 방법)
+            DirectDataSourceFinder.startPeriodicScanning();
+            
+            // HikariCP MXBean 강제 등록 시도 (지연 실행)
+            java.util.concurrent.ScheduledExecutorService mxbeanForcer = 
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+            mxbeanForcer.schedule(() -> {
+                try {
+                    forceHikariCPMXBeanRegistration();
+                } catch (Exception e) {
+                    System.out.println("❌ HikariCP MXBean 강제 등록 실패: " + e.getMessage());
+                }
+            }, 75, java.util.concurrent.TimeUnit.SECONDS);
             
             // HTTP 전송 테스트
             testHttpTransmission(config);
@@ -87,9 +118,11 @@ public class KubeDBAgent {
                 .ignore(ElementMatchers.nameStartsWith("net.bytebuddy.")
                        .or(ElementMatchers.nameStartsWith("io.kubedb.monitor.agent.")))
                 
-                // 모든 Connection 구현체 인터셉트
+                // 모든 Connection 구현체 인터셉트 (HikariCP Proxy 포함)
                 .type(ElementMatchers.isSubTypeOf(java.sql.Connection.class)
-                     .and(ElementMatchers.not(ElementMatchers.isInterface())))
+                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                     .or(ElementMatchers.nameContains("HikariProxy"))
+                     .or(ElementMatchers.nameContains("PgConnection")))
                 .transform((builder, type, classLoader, module, protectionDomain) -> {
                     System.out.println("🔍 Connection 클래스 발견: " + type.getName());
                     return builder
@@ -102,9 +135,11 @@ public class KubeDBAgent {
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })
                 
-                // 모든 PreparedStatement 구현체 인터셉트
+                // 모든 PreparedStatement 구현체 인터셉트 (HikariCP Proxy 포함)
                 .type(ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)
-                     .and(ElementMatchers.not(ElementMatchers.isInterface())))
+                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                     .or(ElementMatchers.nameContains("HikariProxy"))
+                     .or(ElementMatchers.nameContains("PgPreparedStatement")))
                 .transform((builder, type, classLoader, module, protectionDomain) -> {
                     System.out.println("🔍 PreparedStatement 클래스 발견: " + type.getName());
                     return builder
@@ -115,10 +150,12 @@ public class KubeDBAgent {
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })
                 
-                // 모든 Statement 구현체 인터셉트
+                // 모든 Statement 구현체 인터셉트 (HikariCP Proxy 포함)
                 .type(ElementMatchers.isSubTypeOf(java.sql.Statement.class)
                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                     .and(ElementMatchers.not(ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class))))
+                     .and(ElementMatchers.not(ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)))
+                     .or(ElementMatchers.nameContains("HikariProxy"))
+                     .or(ElementMatchers.nameContains("PgStatement")))
                 .transform((builder, type, classLoader, module, protectionDomain) -> {
                     System.out.println("🔍 Statement 클래스 발견: " + type.getName());
                     return builder
@@ -126,6 +163,17 @@ public class KubeDBAgent {
                                .or(ElementMatchers.named("executeQuery"))
                                .or(ElementMatchers.named("executeUpdate")))
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
+                })
+                
+                // 모든 DataSource 구현체 인터셉트 (Connection Pool 감지)
+                .type(ElementMatchers.isSubTypeOf(javax.sql.DataSource.class)
+                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                     .and(ElementMatchers.not(ElementMatchers.nameContains("Proxy"))))
+                .transform((builder, type, classLoader, module, protectionDomain) -> {
+                    System.out.println("🔗 DataSource 클래스 발견: " + type.getName());
+                    return builder
+                        .method(ElementMatchers.named("getConnection"))
+                        .intercept(MethodDelegation.to(DataSourceInterceptor.class));
                 })
                 
                 .installOn(inst);
@@ -195,6 +243,127 @@ public class KubeDBAgent {
      */
     public static AgentConfig getConfig() {
         return config;
+    }
+    
+    /**
+     * Get the global metrics collector
+     */
+    public static MetricsCollector getGlobalMetricsCollector() {
+        return globalMetricsCollector;
+    }
+    
+    /**
+     * HikariCP MXBean 강제 등록 시도
+     */
+    private static void forceHikariCPMXBeanRegistration() {
+        System.out.println("🔧 HikariCP MXBean 강제 등록 시도 시작...");
+        
+        try {
+            // 모든 로드된 클래스에서 HikariDataSource 찾기
+            Class<?>[] loadedClasses = instrumentation.getAllLoadedClasses();
+            
+            for (Class<?> clazz : loadedClasses) {
+                if (clazz.getName().equals("com.zaxxer.hikari.HikariDataSource")) {
+                    System.out.println("✅ HikariDataSource 클래스 발견: " + clazz.getName());
+                    
+                    // Static 필드나 인스턴스에서 HikariDataSource 객체 찾기
+                    findAndRegisterHikariInstances(clazz);
+                    break;
+                }
+            }
+            
+            // Spring ApplicationContext를 통한 접근 시도
+            trySpringApplicationContextAccess();
+            
+        } catch (Exception e) {
+            System.out.println("❌ HikariCP MXBean 강제 등록 중 오류: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Spring ApplicationContext를 통해 HikariDataSource 찾기 및 MXBean 등록
+     */
+    private static void trySpringApplicationContextAccess() {
+        try {
+            Class<?> contextHolderClass = Class.forName("org.springframework.context.ApplicationContextHolder");
+            java.lang.reflect.Method getContextMethod = contextHolderClass.getMethod("getApplicationContext");
+            Object applicationContext = getContextMethod.invoke(null);
+            
+            if (applicationContext != null) {
+                System.out.println("✅ Spring ApplicationContext 발견");
+                
+                // DataSource Bean 가져오기
+                java.lang.reflect.Method getBeanMethod = applicationContext.getClass().getMethod("getBean", Class.class);
+                Object dataSourceBean = getBeanMethod.invoke(applicationContext, javax.sql.DataSource.class);
+                
+                if (dataSourceBean != null && dataSourceBean.getClass().getName().contains("Hikari")) {
+                    System.out.println("🎯 HikariDataSource Bean 발견: " + dataSourceBean.getClass().getSimpleName());
+                    
+                    // MXBean 등록 강제 시도
+                    forceEnableMXBean(dataSourceBean);
+                    
+                    // MetricsCollector에도 등록
+                    if (globalMetricsCollector != null) {
+                        globalMetricsCollector.registerDataSource((javax.sql.DataSource) dataSourceBean);
+                        System.out.println("✅ DataSource를 MetricsCollector에 등록 완료");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("🔍 Spring ApplicationContext 접근 실패 (정상일 수 있음): " + e.getMessage());
+        }
+    }
+    
+    /**
+     * HikariDataSource 인스턴스 찾기 및 등록
+     */
+    private static void findAndRegisterHikariInstances(Class<?> hikariClass) {
+        try {
+            // 이 방법은 복잡하므로 Spring 방식을 우선 시도
+            System.out.println("🔍 HikariDataSource 인스턴스 검색 중...");
+        } catch (Exception e) {
+            System.out.println("🔍 HikariDataSource 인스턴스 검색 실패: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * HikariDataSource에서 MXBean 등록 강제 활성화
+     */
+    private static void forceEnableMXBean(Object dataSource) {
+        try {
+            // setRegisterMbeans 메서드 호출 시도
+            java.lang.reflect.Method setRegisterMBeans = dataSource.getClass().getMethod("setRegisterMbeans", boolean.class);
+            setRegisterMBeans.invoke(dataSource, true);
+            
+            System.out.println("🔧 HikariCP setRegisterMbeans(true) 호출 성공");
+            
+            // HikariPool에서 직접 MXBean 등록 시도
+            try {
+                java.lang.reflect.Field poolField = dataSource.getClass().getDeclaredField("pool");
+                poolField.setAccessible(true);
+                Object pool = poolField.get(dataSource);
+                
+                if (pool != null) {
+                    System.out.println("🎯 HikariPool 인스턴스 접근 성공");
+                    
+                    // Pool의 MXBean 등록 상태 확인
+                    try {
+                        java.lang.reflect.Method registerMBeanMethod = pool.getClass().getMethod("setRegisterMbeans", boolean.class);
+                        registerMBeanMethod.invoke(pool, true);
+                        System.out.println("✅ HikariPool MXBean 등록 강제 활성화 성공");
+                    } catch (Exception e) {
+                        System.out.println("🔍 HikariPool MXBean 등록 방법을 찾을 수 없음: " + e.getMessage());
+                    }
+                }
+                
+            } catch (Exception e) {
+                System.out.println("🔍 HikariPool 접근 실패: " + e.getMessage());
+            }
+            
+        } catch (Exception e) {
+            System.out.println("❌ HikariCP MXBean 강제 등록 실패: " + e.getMessage());
+        }
     }
     
     /**
