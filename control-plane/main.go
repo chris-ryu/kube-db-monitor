@@ -64,6 +64,15 @@ type SystemMetrics struct {
 	ConnectionPoolIdle        *int     `json:"connection_pool_idle,omitempty"`
 	ConnectionPoolMax         *int     `json:"connection_pool_max,omitempty"`
 	ConnectionPoolUsageRatio  *float64 `json:"connection_pool_usage_ratio,omitempty"`
+	
+	// 고급 Connection Pool 메트릭 추가
+	ConnectionPoolPeakActive         *int     `json:"connection_pool_peak_active,omitempty"`
+	ConnectionPoolPeakTimestamp      *int64   `json:"connection_pool_peak_timestamp,omitempty"`
+	ConnectionPoolRequestsPerSecond  *int     `json:"connection_pool_requests_per_second,omitempty"`
+	ConnectionPoolHealthScore        *int     `json:"connection_pool_health_score,omitempty"`
+	ConnectionPoolAverageHoldTime    *float64 `json:"connection_pool_average_hold_time,omitempty"`
+	ConnectionPoolWaitingThreads     *int     `json:"connection_pool_waiting_threads,omitempty"`
+	
 	HeapUsedMb               *int64   `json:"heap_used_mb,omitempty"`
 	HeapMaxMb                *int64   `json:"heap_max_mb,omitempty"`
 	HeapUsageRatio           *float64 `json:"heap_usage_ratio,omitempty"`

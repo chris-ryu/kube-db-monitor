@@ -28,6 +28,13 @@ public class ConnectionPoolMonitor {
     private volatile boolean started = false;
     private volatile PoolMetrics lastCollectedMetrics = PoolMetrics.empty();
     
+    // Peak 값 추적을 위한 필드들
+    private volatile int peakActiveConnections = 0;
+    private volatile long peakTimestamp = System.currentTimeMillis();
+    private volatile long connectionRequestCount = 0;
+    private volatile long lastConnectionRequestCount = 0;
+    private volatile long lastMetricsTime = System.currentTimeMillis();
+    
     public ConnectionPoolMonitor(long metricsIntervalSeconds) {
         this.metricsIntervalSeconds = metricsIntervalSeconds;
         this.detector = new WASConnectionPoolDetector();
@@ -98,10 +105,12 @@ public class ConnectionPoolMonitor {
             }
             
             for (DataSource dataSource : dataSources) {
-                PoolMetrics metrics = collectPoolMetrics(dataSource);
-                if (metrics != null && metrics.getPoolType() != PoolType.UNKNOWN) {
-                    lastCollectedMetrics = metrics;
-                    logger.fine(String.format("[KubeDB] Pool 메트릭 수집: %s", metrics));
+                PoolMetrics rawMetrics = collectPoolMetrics(dataSource);
+                if (rawMetrics != null && rawMetrics.getPoolType() != PoolType.UNKNOWN) {
+                    // Peak 값 추적 및 고급 메트릭 계산
+                    PoolMetrics enhancedMetrics = enhanceWithAdvancedMetrics(rawMetrics);
+                    lastCollectedMetrics = enhancedMetrics;
+                    logger.fine(String.format("[KubeDB] Pool 메트릭 수집 (고급): %s", enhancedMetrics));
                 }
             }
             
@@ -131,6 +140,79 @@ public class ConnectionPoolMonitor {
                    poolType.getDisplayName(), dataSource.getClass().getName()));
         
         return PoolMetrics.empty();
+    }
+    
+    /**
+     * 기본 메트릭에 고급 모니터링 메트릭을 추가
+     */
+    private PoolMetrics enhanceWithAdvancedMetrics(PoolMetrics rawMetrics) {
+        long currentTime = System.currentTimeMillis();
+        int currentActive = rawMetrics.getActiveConnections();
+        
+        // 1. Peak Active Connections 추적
+        if (currentActive > peakActiveConnections) {
+            peakActiveConnections = currentActive;
+            peakTimestamp = currentTime;
+            logger.info(String.format("[KubeDB] 새로운 Peak Active Connections: %d (이전: %d)", 
+                       currentActive, peakActiveConnections));
+        }
+        
+        // 2. Connection Requests Per Second 계산
+        long timeDelta = currentTime - lastMetricsTime;
+        long connectionRequestsPerSecond = 0;
+        
+        if (timeDelta > 0) {
+            long requestDelta = connectionRequestCount - lastConnectionRequestCount;
+            connectionRequestsPerSecond = (requestDelta * 1000) / timeDelta;
+            lastConnectionRequestCount = connectionRequestCount;
+            lastMetricsTime = currentTime;
+        }
+        
+        // 3. 평균 Connection Hold Time 계산 (단순화된 추정)
+        double avgHoldTime = estimateAverageConnectionHoldTime(rawMetrics);
+        
+        // 4. 고급 메트릭이 포함된 새로운 PoolMetrics 생성
+        return new PoolMetrics.Builder(rawMetrics.getPoolType(), rawMetrics.getPoolName())
+                .activeConnections(rawMetrics.getActiveConnections())
+                .idleConnections(rawMetrics.getIdleConnections())
+                .maxConnections(rawMetrics.getMaxConnections())
+                .waitingThreads(rawMetrics.getWaitingThreads())
+                .averageCheckoutTime(rawMetrics.getAverageCheckoutTime())
+                .totalConnectionsCreated(rawMetrics.getTotalConnectionsCreated())
+                .totalConnectionsClosed(rawMetrics.getTotalConnectionsClosed())
+                // 고급 메트릭 추가
+                .peakActiveConnections(peakActiveConnections)
+                .peakTimestamp(peakTimestamp)
+                .connectionRequestsPerSecond(connectionRequestsPerSecond)
+                .averageConnectionHoldTime(avgHoldTime)
+                .build();
+    }
+    
+    /**
+     * 평균 Connection Hold Time 추정
+     * (실제 구현에서는 Connection Proxy에서 더 정확한 측정이 필요)
+     */
+    private double estimateAverageConnectionHoldTime(PoolMetrics metrics) {
+        // 단순화된 추정: 활성 Connection이 많을수록 Hold Time이 길 것으로 가정
+        int active = metrics.getActiveConnections();
+        int max = metrics.getMaxConnections();
+        
+        if (max == 0) {
+            return 0.0;
+        }
+        
+        // 기본 50ms에서 사용률에 따라 증가
+        double baseTime = 50.0; // 50ms
+        double usageRatio = (double) active / max;
+        
+        return baseTime * (1 + usageRatio * 2); // 최대 150ms까지
+    }
+    
+    /**
+     * Connection 요청 카운트 증가 (외부에서 호출)
+     */
+    public void recordConnectionRequest() {
+        connectionRequestCount++;
     }
     
     /**

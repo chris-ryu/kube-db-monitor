@@ -199,7 +199,8 @@
       "Bash(do kubectl exec university-registration-demo-548579546c-w8fx6 -n kubedb-monitor-test -- curl -s http://localhost:8080/api/courses)",
       "Bash(/tmp/bytebuddy-interception-test.sh:*)",
       "Bash(do kubectl exec university-registration-demo-548579546c-5rwkb -n kubedb-monitor-test -- curl -s \"http://localhost:8080/api/courses/CS00$i\")",
-      "Bash(/tmp/detailed-metrics-analysis.sh:*)"
+      "Bash(/tmp/detailed-metrics-analysis.sh:*)",
+      "Bash(/tmp/active-connections-test.sh:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

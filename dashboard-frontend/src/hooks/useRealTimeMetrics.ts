@@ -245,6 +245,20 @@ function calculateAggregatedMetrics(metrics: QueryMetrics[]): AggregatedMetrics 
     .filter((m): m is NonNullable<typeof m> => m !== undefined)
     
   const latestSystemMetrics = systemMetricsArray[0] // Already sorted by newest first
+  
+  // 디버깅: Connection Pool 메트릭 상태 로깅
+  if (systemMetricsArray.length > 0) {
+    console.log('🔍 Latest system metrics:', JSON.stringify(latestSystemMetrics, null, 2))
+    console.log('🔍 Connection Pool fields:', {
+      connection_pool_active: latestSystemMetrics?.connection_pool_active,
+      connection_pool_idle: latestSystemMetrics?.connection_pool_idle,
+      connection_pool_max: latestSystemMetrics?.connection_pool_max,
+      connection_pool_peak_active: latestSystemMetrics?.connection_pool_peak_active,
+      connection_pool_health_score: latestSystemMetrics?.connection_pool_health_score
+    })
+  } else {
+    console.log('❌ No system metrics available')
+  }
 
   const active_connections = latestSystemMetrics?.connection_pool_active ?? 0
   const idle_connections = latestSystemMetrics?.connection_pool_idle ?? 0
@@ -252,6 +266,14 @@ function calculateAggregatedMetrics(metrics: QueryMetrics[]): AggregatedMetrics 
   const pool_usage_ratio = latestSystemMetrics?.connection_pool_usage_ratio ?? 0
   const heap_usage_ratio = latestSystemMetrics?.heap_usage_ratio ?? 0
   const cpu_usage_ratio = latestSystemMetrics?.cpu_usage_ratio ?? 0
+  
+  // 고급 Connection Pool 메트릭
+  const peak_active_connections = latestSystemMetrics?.connection_pool_peak_active ?? 0
+  const peak_timestamp = latestSystemMetrics?.connection_pool_peak_timestamp ?? 0
+  const connection_requests_per_second = latestSystemMetrics?.connection_pool_requests_per_second ?? 0
+  const pool_health_score = latestSystemMetrics?.connection_pool_health_score ?? 0
+  const average_hold_time = latestSystemMetrics?.connection_pool_average_hold_time ?? 0
+  const waiting_threads = latestSystemMetrics?.connection_pool_waiting_threads ?? 0
 
   const result = {
     qps: Math.round(qps * 100) / 100, // Round to 2 decimal places
@@ -270,6 +292,20 @@ function calculateAggregatedMetrics(metrics: QueryMetrics[]): AggregatedMetrics 
     poolUsageRatio: Math.round(pool_usage_ratio * 100) / 100, // camelCase version
     heap_usage_ratio: Math.round(heap_usage_ratio * 100) / 100,
     cpu_usage_ratio: Math.round(cpu_usage_ratio * 100) / 100,
+    
+    // 고급 Connection Pool 메트릭 추가
+    peak_active_connections,
+    peakActiveConnections: peak_active_connections, // camelCase version
+    pool_health_score,
+    poolHealthScore: pool_health_score, // camelCase version
+    connection_requests_per_second,
+    connectionRequestsPerSecond: connection_requests_per_second, // camelCase version
+    average_hold_time: Math.round(average_hold_time * 100) / 100,
+    averageHoldTime: Math.round(average_hold_time * 100) / 100, // camelCase version
+    waiting_threads,
+    waitingThreads: waiting_threads, // camelCase version
+    peak_timestamp,
+    peakTimestamp: peak_timestamp, // camelCase version
   }
 
   console.log('📊 Calculated new aggregated metrics: ', result)

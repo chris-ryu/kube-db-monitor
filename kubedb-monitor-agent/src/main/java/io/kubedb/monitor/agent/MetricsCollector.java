@@ -52,13 +52,13 @@ public class MetricsCollector {
     public MetricsCollector(AgentConfig config) {
         this.config = config;
         this.transmitter = new HttpMetricsTransmitter(config);
-        this.poolMonitor = new ConnectionPoolMonitor(5); // 5초 간격으로 Pool 메트릭 수집
+        this.poolMonitor = new ConnectionPoolMonitor(2); // 2초 간격으로 Pool 메트릭 수집 (개선)
         
-        // Long-running transaction 모니터링 스케줄러 시작 (5초마다 체크)
-        transactionMonitor.scheduleAtFixedRate(this::checkLongRunningTransactions, 5, 5, TimeUnit.SECONDS);
+        // Long-running transaction 모니터링 스케줄러 시작 (3초마다 체크 - 개선)
+        transactionMonitor.scheduleAtFixedRate(this::checkLongRunningTransactions, 3, 3, TimeUnit.SECONDS);
         
-        // Connection Pool 메트릭 주기적 전송 (10초마다)
-        transactionMonitor.scheduleAtFixedRate(this::sendConnectionPoolMetrics, 10, 10, TimeUnit.SECONDS);
+        // Connection Pool 메트릭 주기적 전송 (5초마다 - 개선)
+        transactionMonitor.scheduleAtFixedRate(this::sendConnectionPoolMetrics, 5, 5, TimeUnit.SECONDS);
         
         // Connection Pool 모니터링 시작
         poolMonitor.start();
@@ -87,6 +87,11 @@ public class MetricsCollector {
         
         if (executionTimeMs > maxQueryTime) {
             maxQueryTime = executionTimeMs;
+        }
+        
+        // Connection 요청 추적 (새로운 기능)
+        if (poolMonitor != null) {
+            poolMonitor.recordConnectionRequest();
         }
         
         // HTTP 전송 (Connection Pool 메트릭 포함)
@@ -384,7 +389,20 @@ public class MetricsCollector {
                 PoolMetrics latestMetrics = poolMonitor.getLatestMetrics();
                 if (latestMetrics != null && !latestMetrics.isEmpty()) {
                     transmitter.transmitSystemMetrics(latestMetrics);
-                    logger.info(String.format("[KubeDB] 📊 Connection Pool 메트릭 전송: %s", latestMetrics));
+                    
+                    // 고급 메트릭 정보 포함한 상세 로깅
+                    String detailedLog = String.format(
+                        "[KubeDB] 📊 고급 Connection Pool 메트릭 전송: %s, 건강도: %d%%, 요청률: %d/sec", 
+                        latestMetrics.toString(),
+                        latestMetrics.getConnectionPoolHealth() != null ? latestMetrics.getConnectionPoolHealth() : 0,
+                        latestMetrics.getConnectionRequestsPerSecond() != null ? latestMetrics.getConnectionRequestsPerSecond() : 0
+                    );
+                    
+                    if (latestMetrics.getPeakActiveConnections() != null && latestMetrics.getPeakActiveConnections() > 0) {
+                        detailedLog += String.format(", Peak: %d", latestMetrics.getPeakActiveConnections());
+                    }
+                    
+                    logger.info(detailedLog);
                 } else {
                     logger.fine("[KubeDB] Connection Pool 메트릭이 없거나 비어있음");
                 }

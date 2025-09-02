@@ -113,6 +113,8 @@ public class HttpMetricsTransmitter {
         executor.submit(() -> {
             try {
                 String json = createSystemMetricJson(poolMetrics);
+                // 디버깅: 전송하는 JSON 구조 로그 출력
+                logger.info("[KubeDB] 🔍 Transmitting system metrics JSON: {}", json);
                 sendHttpPost(json);
                 logger.debug("[KubeDB] System metrics transmitted: {}", poolMetrics.getPoolType().getDisplayName());
             } catch (Exception e) {
@@ -287,7 +289,7 @@ public class HttpMetricsTransmitter {
     }
     
     /**
-     * 시스템 메트릭 전용 JSON 생성
+     * 시스템 메트릭 전용 JSON 생성 (고급 Connection Pool 메트릭 포함)
      */
     private String createSystemMetricJson(PoolMetrics poolMetrics) {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z";
@@ -305,7 +307,14 @@ public class HttpMetricsTransmitter {
                 "\"connection_pool_usage_ratio\": %.3f," +
                 "\"pool_type\": \"%s\"," +
                 "\"pool_name\": \"%s\"," +
-                "\"total_connections\": %d" +
+                "\"total_connections\": %d," +
+                // 고급 Connection Pool 메트릭 추가
+                "\"connection_pool_peak_active\": %d," +
+                "\"connection_pool_peak_timestamp\": %d," +
+                "\"connection_pool_requests_per_second\": %d," +
+                "\"connection_pool_health_score\": %d," +
+                "\"connection_pool_average_hold_time\": %.2f," +
+                "\"connection_pool_waiting_threads\": %d" +
             "}" +
             "}",
             timestamp,
@@ -317,7 +326,14 @@ public class HttpMetricsTransmitter {
             poolMetrics.getConnectionUsageRatio(),
             poolMetrics.getPoolType().getDisplayName(),
             poolMetrics.getPoolName(),
-            poolMetrics.getTotalConnections()
+            poolMetrics.getTotalConnections(),
+            // 고급 메트릭 값 추가 (null-safe)
+            poolMetrics.getPeakActiveConnections() != null ? poolMetrics.getPeakActiveConnections() : 0,
+            poolMetrics.getPeakTimestamp() != null ? poolMetrics.getPeakTimestamp() : 0,
+            poolMetrics.getConnectionRequestsPerSecond() != null ? poolMetrics.getConnectionRequestsPerSecond() : 0,
+            poolMetrics.getConnectionPoolHealth() != null ? poolMetrics.getConnectionPoolHealth() : 0,
+            poolMetrics.getAverageConnectionHoldTime() != null ? poolMetrics.getAverageConnectionHoldTime() : 0.0,
+            poolMetrics.getWaitingThreads() != null ? poolMetrics.getWaitingThreads() : 0
         );
     }
     

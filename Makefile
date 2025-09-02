@@ -290,30 +290,34 @@ build-dashboard: docker-login ## Dashboard 이미지 빌드, 푸시 및 배포
 	fi
 	@echo "$(GREEN)✅ Dashboard 이미지 빌드 완료: $(DASHBOARD_IMAGE)$(RESET)"
 
-build-university-app: docker-login ## 수강신청 앱 이미지 빌드, 푸시 및 배포
-	@echo "$(YELLOW)🎓 수강신청 앱 이미지 빌드 시작$(RESET)"
+build-university-app: docker-login ## 수강신청 앱 이미지 빌드, 푸시 및 배포 (Backend API + Frontend UI)
+	@echo "$(YELLOW)🎓 수강신청 앱 이미지 빌드 시작 (Backend + Frontend)$(RESET)"
 	@if [ -d "sample-apps/university-registration" ]; then \
-		echo "$(CYAN)  Maven 프로젝트 빌드: sample-apps/university-registration$(RESET)"; \
+		echo "$(CYAN)  🔧 Backend (API) Maven 빌드: sample-apps/university-registration$(RESET)"; \
 		cd sample-apps/university-registration && mvn clean package -DskipTests=true -q; \
-		echo "$(CYAN)  Backend Docker 이미지 빌드: $(UNIVERSITY_APP_IMAGE)$(RESET)"; \
+		echo "$(CYAN)  🔧 Backend (API) Docker 이미지 빌드: $(UNIVERSITY_APP_IMAGE)$(RESET)"; \
 		docker build $(DOCKER_BUILD_ARGS) -f sample-apps/university-registration/Dockerfile -t "$(UNIVERSITY_APP_IMAGE)" ./sample-apps/university-registration; \
 		if [ "$(PUSH_IMAGES)" = "true" ]; then \
-			echo "$(CYAN)  Backend 이미지 푸시: $(UNIVERSITY_APP_IMAGE)$(RESET)"; \
+			echo "$(CYAN)  🔧 Backend (API) 이미지 푸시: $(UNIVERSITY_APP_IMAGE)$(RESET)"; \
 			docker push "$(UNIVERSITY_APP_IMAGE)"; \
 		fi; \
+	else \
+		echo "$(YELLOW)[WARNING]$(RESET) Backend 디렉터리를 찾을 수 없습니다: sample-apps/university-registration"; \
 	fi
 	@if [ -d "sample-apps/university-registration-ui" ]; then \
-		echo "$(CYAN)  Frontend Docker 이미지 빌드: $(UNIVERSITY_UI_IMAGE)$(RESET)"; \
+		echo "$(CYAN)  🎨 Frontend (UI) Docker 이미지 빌드: $(UNIVERSITY_UI_IMAGE)$(RESET)"; \
 		docker build $(DOCKER_BUILD_ARGS) -f sample-apps/university-registration-ui/Dockerfile -t "$(UNIVERSITY_UI_IMAGE)" ./sample-apps/university-registration-ui; \
 		if [ "$(PUSH_IMAGES)" = "true" ]; then \
-			echo "$(CYAN)  Frontend 이미지 푸시: $(UNIVERSITY_UI_IMAGE)$(RESET)"; \
+			echo "$(CYAN)  🎨 Frontend (UI) 이미지 푸시: $(UNIVERSITY_UI_IMAGE)$(RESET)"; \
 			docker push "$(UNIVERSITY_UI_IMAGE)"; \
 		fi; \
+	else \
+		echo "$(YELLOW)[WARNING]$(RESET) Frontend 디렉터리를 찾을 수 없습니다: sample-apps/university-registration-ui"; \
 	fi
 	@if [ "$(REDEPLOY_AFTER_BUILD)" = "true" ] && [ "$(PUSH_IMAGES)" = "true" ]; then \
 		$(MAKE) redeploy-university-app; \
 	fi
-	@echo "$(GREEN)✅ 수강신청 앱 이미지 빌드 완료$(RESET)"
+	@echo "$(GREEN)✅ 수강신청 앱 (Backend + Frontend) 이미지 빌드 완료$(RESET)"
 
 build-all-force: docker-login ## 캐시 없이 모든 이미지 강제 재빌드
 	@echo "$(YELLOW)🔄 모든 이미지 강제 재빌드 중 (캐시 없음)...$(RESET)"
@@ -392,47 +396,76 @@ redeploy-university: ## 수강신청 앱 삭제 후 재배포
 redeploy-agent-deployments: ## Agent가 포함된 배포들 재시작
 	@echo "$(BLUE)📦 Agent 관련 배포 재시작$(RESET)"
 	@if kubectl get deployment university-registration-demo -n kubedb-monitor-test >/dev/null 2>&1; then \
+		echo "$(CYAN)  기존 university-registration-demo 완전 제거...$(RESET)"; \
+		kubectl delete deployment university-registration-demo -n kubedb-monitor-test --grace-period=30 --timeout=60s; \
+		kubectl delete pods -n kubedb-monitor-test -l app=university-registration-demo --grace-period=0 --force >/dev/null 2>&1 || true; \
 		echo "$(CYAN)  university-registration-demo 재배포 중...$(RESET)"; \
-		kubectl delete deployment university-registration-demo -n kubedb-monitor-test; \
 		kubectl apply -f k8s/university-registration-demo-complete.yaml; \
+		kubectl rollout status deployment/university-registration-demo -n kubedb-monitor-test --timeout=180s; \
 		echo "$(GREEN)[SUCCESS]$(RESET) university-registration-demo 재배포 완료"; \
 	fi
 	@if kubectl get deployment university-registration -n kubedb-monitor-test >/dev/null 2>&1; then \
+		echo "$(CYAN)  기존 university-registration 완전 제거...$(RESET)"; \
+		kubectl delete deployment university-registration -n kubedb-monitor-test --grace-period=30 --timeout=60s; \
+		kubectl delete pods -n kubedb-monitor-test -l app=university-registration --grace-period=0 --force >/dev/null 2>&1 || true; \
 		echo "$(CYAN)  university-registration 재배포 중...$(RESET)"; \
-		kubectl delete deployment university-registration -n kubedb-monitor-test; \
 		kubectl apply -f k8s/university-registration-with-ui.yaml; \
+		kubectl rollout status deployment/university-registration -n kubedb-monitor-test --timeout=180s; \
 		echo "$(GREEN)[SUCCESS]$(RESET) university-registration 재배포 완료"; \
 	fi
 
 redeploy-control-plane: ## Control Plane 재배포
 	@echo "$(BLUE)🎛️ Control Plane 재배포$(RESET)"
 	@if kubectl get deployment kubedb-monitor-control-plane -n kubedb-monitor >/dev/null 2>&1; then \
+		echo "$(CYAN)  기존 kubedb-monitor-control-plane 완전 제거...$(RESET)"; \
+		kubectl delete deployment kubedb-monitor-control-plane -n kubedb-monitor --grace-period=30 --timeout=60s; \
+		kubectl delete pods -n kubedb-monitor -l app=kubedb-monitor-control-plane --grace-period=0 --force >/dev/null 2>&1 || true; \
 		echo "$(CYAN)  kubedb-monitor-control-plane 재배포 중...$(RESET)"; \
-		kubectl delete deployment kubedb-monitor-control-plane -n kubedb-monitor; \
 		kubectl apply -f k8s/kubedb-monitor-deployment.yaml; \
+		kubectl rollout status deployment/kubedb-monitor-control-plane -n kubedb-monitor --timeout=120s; \
 		echo "$(GREEN)[SUCCESS]$(RESET) kubedb-monitor-control-plane 재배포 완료"; \
 	fi
 
 redeploy-dashboard: ## Dashboard 재배포
 	@echo "$(BLUE)📊 Dashboard 재배포$(RESET)"
 	@if kubectl get deployment kubedb-monitor-dashboard -n kubedb-monitor >/dev/null 2>&1; then \
+		echo "$(CYAN)  기존 kubedb-monitor-dashboard 완전 제거...$(RESET)"; \
+		kubectl delete deployment kubedb-monitor-dashboard -n kubedb-monitor --grace-period=30 --timeout=60s; \
+		kubectl delete pods -n kubedb-monitor -l app=kubedb-monitor-dashboard --grace-period=0 --force >/dev/null 2>&1 || true; \
 		echo "$(CYAN)  kubedb-monitor-dashboard 재배포 중...$(RESET)"; \
-		kubectl delete deployment kubedb-monitor-dashboard -n kubedb-monitor; \
 		kubectl apply -f k8s/kubedb-monitor-deployment.yaml; \
+		kubectl rollout status deployment/kubedb-monitor-dashboard -n kubedb-monitor --timeout=120s; \
 		echo "$(GREEN)[SUCCESS]$(RESET) kubedb-monitor-dashboard 재배포 완료"; \
 	fi
 
-redeploy-university-app: ## University App 재배포
-	@echo "$(BLUE)🎓 University App 재배포$(RESET)"
+redeploy-university-app: ## University App 재배포 (Backend API + Frontend UI)
+	@echo "$(BLUE)🎓 University App 재배포 (Backend API + Frontend UI)$(RESET)"
+	@echo "$(CYAN)  🔧 Backend (API) 서비스 재배포 중...$(RESET)"
 	@if kubectl get deployment university-registration-demo -n kubedb-monitor-test >/dev/null 2>&1; then \
-		$(MAKE) redeploy-agent-deployments; \
+		echo "$(CYAN)    기존 university-registration-demo 완전 제거...$(RESET)"; \
+		kubectl delete deployment university-registration-demo -n kubedb-monitor-test --grace-period=30 --timeout=60s; \
+		kubectl delete pods -n kubedb-monitor-test -l app=university-registration-demo --grace-period=0 --force >/dev/null 2>&1 || true; \
 	fi
+	@echo "$(CYAN)  🎨 Frontend (UI) 서비스 재배포 중...$(RESET)"
 	@if kubectl get deployment university-registration-ui -n kubedb-monitor-test >/dev/null 2>&1; then \
-		echo "$(CYAN)  university-registration-ui 재배포 중...$(RESET)"; \
-		kubectl delete deployment university-registration-ui -n kubedb-monitor-test; \
-		kubectl apply -f k8s/university-registration-with-ui.yaml; \
-		echo "$(GREEN)[SUCCESS]$(RESET) university-registration-ui 재배포 완료"; \
+		echo "$(CYAN)    기존 university-registration-ui 완전 제거...$(RESET)"; \
+		kubectl delete deployment university-registration-ui -n kubedb-monitor-test --grace-period=30 --timeout=60s; \
+		kubectl delete pods -n kubedb-monitor-test -l app=university-registration-ui --grace-period=0 --force >/dev/null 2>&1 || true; \
 	fi
+	@echo "$(CYAN)  🚀 새로운 University App 배포 적용 중...$(RESET)"
+	@kubectl apply -f k8s/university-registration-with-ui.yaml
+	@echo "$(CYAN)  ⏳ Backend (API) 배포 준비 대기...$(RESET)"
+	@kubectl rollout status deployment/university-registration-demo -n kubedb-monitor-test --timeout=180s || echo "$(YELLOW)[WARNING]$(RESET) Backend 배포 대기 시간 초과"
+	@echo "$(CYAN)  ⏳ Frontend (UI) 배포 준비 대기...$(RESET)"
+	@kubectl rollout status deployment/university-registration-ui -n kubedb-monitor-test --timeout=120s || echo "$(YELLOW)[WARNING]$(RESET) Frontend 배포 대기 시간 초과"
+	@echo "$(CYAN)  📊 University App 서비스 상태 확인...$(RESET)"
+	@echo "$(YELLOW)    🔧 Backend API Service:$(RESET)"
+	@kubectl get service university-registration-demo-service -n kubedb-monitor-test 2>/dev/null || echo "$(RED)[ERROR]$(RESET) Backend API Service를 찾을 수 없음"
+	@echo "$(YELLOW)    🎨 Frontend UI Service:$(RESET)"
+	@kubectl get service university-registration-ui-service -n kubedb-monitor-test 2>/dev/null || echo "$(RED)[ERROR]$(RESET) Frontend UI Service를 찾을 수 없음"
+	@echo "$(YELLOW)    🌐 Ingress:$(RESET)"
+	@kubectl get ingress university-registration-demo-ingress -n kubedb-monitor-test 2>/dev/null || echo "$(RED)[ERROR]$(RESET) University Ingress를 찾을 수 없음"
+	@echo "$(GREEN)[SUCCESS]$(RESET) 🎉 University App (Backend + Frontend) 재배포 완료"
 
 clean-deploy: ## Kubernetes 배포 삭제
 	@echo "$(RED)🗑️ KubeDB Monitor 배포 삭제$(RESET)"
@@ -553,10 +586,10 @@ build-and-deploy-dashboard: ## Dashboard만 빌드, 푸시, 배포 (build-images
 	@$(SCRIPTS_DIR)/build-images.sh dashboard --push
 	@echo "$(GREEN)✅ Dashboard 빌드 및 배포 완료$(RESET)"
 
-build-and-deploy-university: ## University App만 빌드, 푸시, 배포 (build-images.sh 호출)
-	@echo "$(BLUE)🎓 University App 빌드 및 배포 시작 (build-images.sh 스크립트 호출)$(RESET)"
+build-and-deploy-university: ## University App만 빌드, 푸시, 배포 (Backend API + Frontend UI, build-images.sh 호출)
+	@echo "$(BLUE)🎓 University App 빌드 및 배포 시작 (Backend + Frontend, build-images.sh 스크립트 호출)$(RESET)"
 	@$(SCRIPTS_DIR)/build-images.sh university-app --push
-	@echo "$(GREEN)✅ University App 빌드 및 배포 완료$(RESET)"
+	@echo "$(GREEN)✅ University App (Backend + Frontend) 빌드 및 배포 완료$(RESET)"
 
 ##@ CI/CD
 ci-test: ## CI 환경에서의 테스트 (GitHub Actions 등)

@@ -20,6 +20,13 @@ public class PoolMetrics {
     private final Long totalConnectionsCreated;
     private final Long totalConnectionsClosed;
     
+    // 고급 모니터링 메트릭
+    private final Integer peakActiveConnections;
+    private final Double averageConnectionHoldTime;
+    private final Long connectionRequestsPerSecond;
+    private final Integer connectionPoolHealth; // 0-100 건강도 점수
+    private final Long peakTimestamp; // Peak 값이 기록된 시간
+    
     private PoolMetrics(Builder builder) {
         this.activeConnections = builder.activeConnections;
         this.idleConnections = builder.idleConnections;
@@ -32,6 +39,11 @@ public class PoolMetrics {
         this.averageCheckoutTime = builder.averageCheckoutTime;
         this.totalConnectionsCreated = builder.totalConnectionsCreated;
         this.totalConnectionsClosed = builder.totalConnectionsClosed;
+        this.peakActiveConnections = builder.peakActiveConnections;
+        this.averageConnectionHoldTime = builder.averageConnectionHoldTime;
+        this.connectionRequestsPerSecond = builder.connectionRequestsPerSecond;
+        this.connectionPoolHealth = builder.connectionPoolHealth != null ? builder.connectionPoolHealth : calculatePoolHealth();
+        this.peakTimestamp = builder.peakTimestamp;
     }
     
     /**
@@ -59,6 +71,43 @@ public class PoolMetrics {
         return (double) active / max;
     }
     
+    /**
+     * Connection Pool 건강도 점수 계산 (0-100)
+     * 사용률, 대기 스레드, 응답시간 등을 종합하여 계산
+     */
+    private int calculatePoolHealth() {
+        int healthScore = 100;
+        
+        // 1. 사용률 점검 (50% 이상 사용 시 감점)
+        if (connectionUsageRatio > 0.8) {
+            healthScore -= 30; // 80% 이상 사용 시 -30점
+        } else if (connectionUsageRatio > 0.6) {
+            healthScore -= 15; // 60% 이상 사용 시 -15점
+        } else if (connectionUsageRatio > 0.5) {
+            healthScore -= 5;  // 50% 이상 사용 시 -5점
+        }
+        
+        // 2. 대기 스레드 점검
+        if (waitingThreads != null && waitingThreads > 0) {
+            healthScore -= Math.min(40, waitingThreads * 5); // 대기 스레드당 -5점, 최대 -40점
+        }
+        
+        // 3. 평균 체크아웃 시간 점검 (100ms 이상일 때 감점)
+        if (averageCheckoutTime != null && averageCheckoutTime > 100) {
+            healthScore -= Math.min(20, (int)(averageCheckoutTime / 50)); // 50ms당 -1점, 최대 -20점
+        }
+        
+        // 4. Peak 대비 현재 사용률 점검
+        if (peakActiveConnections != null && peakActiveConnections > 0) {
+            double peakRatio = (double) activeConnections / peakActiveConnections;
+            if (peakRatio > 0.9) {
+                healthScore -= 10; // Peak에 근접 시 -10점
+            }
+        }
+        
+        return Math.max(0, Math.min(100, healthScore));
+    }
+    
     // Getters
     public int getActiveConnections() { return activeConnections; }
     public int getIdleConnections() { return idleConnections; }
@@ -75,11 +124,32 @@ public class PoolMetrics {
     public Long getTotalConnectionsCreated() { return totalConnectionsCreated; }
     public Long getTotalConnectionsClosed() { return totalConnectionsClosed; }
     
+    // 고급 모니터링 getters
+    public Integer getPeakActiveConnections() { return peakActiveConnections; }
+    public Double getAverageConnectionHoldTime() { return averageConnectionHoldTime; }
+    public Long getConnectionRequestsPerSecond() { return connectionRequestsPerSecond; }
+    public Integer getConnectionPoolHealth() { return connectionPoolHealth; }
+    public Long getPeakTimestamp() { return peakTimestamp; }
+    
     @Override
     public String toString() {
-        return String.format("PoolMetrics{type=%s, name=%s, active=%d, idle=%d, max=%d, usage=%.2f%%}",
-                           poolType.getDisplayName(), poolName, activeConnections, idleConnections, 
-                           maxConnections, connectionUsageRatio * 100);
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("PoolMetrics{type=%s, name=%s, active=%d, idle=%d, max=%d, usage=%.2f%%",
+                               poolType.getDisplayName(), poolName, activeConnections, idleConnections, 
+                               maxConnections, connectionUsageRatio * 100));
+        
+        if (peakActiveConnections != null) {
+            sb.append(String.format(", peak=%d", peakActiveConnections));
+        }
+        if (connectionPoolHealth != null) {
+            sb.append(String.format(", health=%d%%", connectionPoolHealth));
+        }
+        if (waitingThreads != null && waitingThreads > 0) {
+            sb.append(String.format(", waiting=%d", waitingThreads));
+        }
+        
+        sb.append("}");
+        return sb.toString();
     }
     
     /**
@@ -95,6 +165,13 @@ public class PoolMetrics {
         private Long averageCheckoutTime;
         private Long totalConnectionsCreated;
         private Long totalConnectionsClosed;
+        
+        // 고급 모니터링 필드
+        private Integer peakActiveConnections;
+        private Double averageConnectionHoldTime;
+        private Long connectionRequestsPerSecond;
+        private Integer connectionPoolHealth;
+        private Long peakTimestamp;
         
         public Builder(PoolType poolType, String poolName) {
             this.poolType = poolType;
@@ -133,6 +210,32 @@ public class PoolMetrics {
         
         public Builder totalConnectionsClosed(Long totalConnectionsClosed) {
             this.totalConnectionsClosed = totalConnectionsClosed;
+            return this;
+        }
+        
+        // 고급 모니터링 Builder 메서드들
+        public Builder peakActiveConnections(Integer peakActiveConnections) {
+            this.peakActiveConnections = peakActiveConnections;
+            return this;
+        }
+        
+        public Builder averageConnectionHoldTime(Double averageConnectionHoldTime) {
+            this.averageConnectionHoldTime = averageConnectionHoldTime;
+            return this;
+        }
+        
+        public Builder connectionRequestsPerSecond(Long connectionRequestsPerSecond) {
+            this.connectionRequestsPerSecond = connectionRequestsPerSecond;
+            return this;
+        }
+        
+        public Builder connectionPoolHealth(Integer connectionPoolHealth) {
+            this.connectionPoolHealth = connectionPoolHealth;
+            return this;
+        }
+        
+        public Builder peakTimestamp(Long peakTimestamp) {
+            this.peakTimestamp = peakTimestamp;
             return this;
         }
         

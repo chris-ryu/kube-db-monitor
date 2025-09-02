@@ -56,11 +56,19 @@ export interface ExecutionContext {
 }
 
 export interface SystemMetrics {
-  // 커넥션 풀 정보
+  // 기본 커넥션 풀 정보
   connection_pool_active?: number
   connection_pool_idle?: number
   connection_pool_max?: number
   connection_pool_usage_ratio?: number
+  
+  // 고급 커넥션 풀 메트릭
+  connection_pool_peak_active?: number
+  connection_pool_peak_timestamp?: number
+  connection_pool_requests_per_second?: number
+  connection_pool_health_score?: number
+  connection_pool_average_hold_time?: number
+  connection_pool_waiting_threads?: number
   
   // 메모리 정보
   heap_used_mb?: number
@@ -134,6 +142,8 @@ export interface AggregatedMetrics {
   avgLatency?: number // camelCase version for consistency
   error_rate: number // Error rate as percentage
   transactionCount?: number // Total transaction count in time window
+  
+  // 기본 Connection Pool 메트릭
   active_connections: number
   activeConnections?: number // camelCase version
   idle_connections: number
@@ -142,6 +152,22 @@ export interface AggregatedMetrics {
   maxConnections?: number // camelCase version
   pool_usage_ratio: number
   poolUsageRatio?: number // camelCase version
+  
+  // 고급 Connection Pool 메트릭
+  peak_active_connections?: number
+  peakActiveConnections?: number // camelCase version
+  pool_health_score?: number
+  poolHealthScore?: number // camelCase version
+  connection_requests_per_second?: number
+  connectionRequestsPerSecond?: number // camelCase version
+  average_hold_time?: number
+  averageHoldTime?: number // camelCase version
+  waiting_threads?: number
+  waitingThreads?: number // camelCase version
+  peak_timestamp?: number
+  peakTimestamp?: number // camelCase version
+  
+  // 시스템 메트릭
   heap_usage_ratio: number
   cpu_usage_ratio: number
   pool_type?: string
@@ -192,6 +218,42 @@ export interface Alert {
   timestamp: string
   acknowledged: boolean
   query_id?: string
+}
+
+// Connection Pool 상세 정보 타입
+export interface ConnectionPoolDetail {
+  pool_name: string
+  pool_type: 'HikariCP' | 'Tomcat' | 'C3P0' | 'DBCP' | 'Unknown'
+  current_active: number
+  current_idle: number
+  max_pool_size: number
+  peak_active: number
+  peak_timestamp: string
+  health_score: number // 0-100
+  requests_per_second: number
+  average_hold_time: number // milliseconds
+  waiting_threads: number
+  usage_ratio: number // 0-1
+  total_connections_created?: number
+  total_connections_closed?: number
+}
+
+// Connection Pool Health Status 타입
+export type PoolHealthStatus = 'excellent' | 'good' | 'warning' | 'critical'
+
+export interface PoolHealthInfo {
+  status: PoolHealthStatus
+  score: number
+  issues: string[]
+  recommendations: string[]
+}
+
+// Connection Pool 사용 패턴 타입
+export interface PoolUsagePattern {
+  timestamp: string
+  active_connections: number
+  requests_per_second: number
+  response_time_ms: number
 }
 
 // 대시보드 설정 타입

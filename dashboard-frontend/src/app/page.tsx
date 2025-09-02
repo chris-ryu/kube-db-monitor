@@ -1,26 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { QueryMetrics } from '@/types/metrics'
+import { QueryMetrics, AggregatedMetrics } from '@/types/metrics'
 import { TransactionEvent } from '@/types/transaction'
 import { DeadlockEvent } from '@/types/deadlock'
 import { DeadlockAlert } from '@/components/DeadlockAlert'
 import { TransactionTimeline } from '@/components/TransactionTimeline'
 import { LongRunningTransactionAlert } from '@/components/LongRunningTransactionAlert'
 import { NodePodMetrics } from '@/components/NodePodMetrics'
+import { ConnectionPoolDetail } from '@/components/ConnectionPoolDetail'
+import { ConnectionPoolChart } from '@/components/ConnectionPoolChart'
 
-interface AggregatedMetrics {
-  qps: number
-  avgLatency: number
-  activeConnections: number
-  idleConnections: number
-  maxConnections: number
-  poolUsageRatio: number
-  errorRate: number
-  transactionCount: number
-  tps: number // Transactions Per Second
-  poolType?: string
-}
 
 export default function Dashboard() {
   // 동적 설정을 위한 state
@@ -35,14 +25,27 @@ export default function Dashboard() {
   const [isConnected, setIsConnected] = useState(false)
   const [aggregatedMetrics, setAggregatedMetrics] = useState<AggregatedMetrics>({
     qps: 0,
+    avg_latency: 0,
     avgLatency: 0,
+    active_connections: 0,
     activeConnections: 0,
+    idle_connections: 0,
     idleConnections: 0,
+    max_connections: 0,
     maxConnections: 0,
+    pool_usage_ratio: 0,
     poolUsageRatio: 0,
-    errorRate: 0,
+    error_rate: 0,
     transactionCount: 0,
-    tps: 0
+    tps: 0,
+    heap_usage_ratio: 0,
+    cpu_usage_ratio: 0,
+    // Advanced Connection Pool metrics
+    peakActiveConnections: 0,
+    poolHealthScore: 0,
+    connectionRequestsPerSecond: 0,
+    averageHoldTime: 0,
+    waitingThreads: 0
   })
 
   useEffect(() => {
@@ -351,6 +354,14 @@ export default function Dashboard() {
     const maxConnections = latestMetric?.metrics?.connection_pool_max ?? 0
     const poolUsageRatio = latestMetric?.metrics?.connection_pool_usage_ratio ?? 0
     
+    // 고급 Connection Pool 메트릭
+    const peakActiveConnections = latestMetric?.metrics?.connection_pool_peak_active ?? 0
+    const peakTimestamp = latestMetric?.metrics?.connection_pool_peak_timestamp ?? 0
+    const connectionRequestsPerSecond = latestMetric?.metrics?.connection_pool_requests_per_second ?? 0
+    const poolHealthScore = latestMetric?.metrics?.connection_pool_health_score ?? 0
+    const averageHoldTime = latestMetric?.metrics?.connection_pool_average_hold_time ?? 0
+    const waitingThreads = latestMetric?.metrics?.connection_pool_waiting_threads ?? 0
+    
     // Calculate transactions per second based on query metrics
     // Fix status check - Control-plane sends 'completed', not 'SUCCESS'
     const successfulQueries = queryMetrics.filter(m => 
@@ -360,16 +371,36 @@ export default function Dashboard() {
     
     console.log('✅ Successful queries:', successfulQueries.length)
     
-    const newMetrics = {
+    const newMetrics: AggregatedMetrics = {
       qps: Math.round(qps * 100) / 100,
+      avg_latency: Math.round(avgLatency * 100) / 100,
       avgLatency: Math.round(avgLatency * 100) / 100,
+      active_connections: activeConnections,
       activeConnections,
+      idle_connections: idleConnections,
       idleConnections,
+      max_connections: maxConnections,
       maxConnections,
+      pool_usage_ratio: Math.round(poolUsageRatio * 100) / 100,
       poolUsageRatio: Math.round(poolUsageRatio * 100) / 100,
-      errorRate: Math.round(errorRate * 100) / 100,
+      error_rate: Math.round(errorRate * 100) / 100,
       transactionCount: Math.max(0, Math.floor(queryMetrics.length / 10)), // Simulate active transactions based on recent query activity
-      tps: Math.round(tps * 100) / 100
+      tps: Math.round(tps * 100) / 100,
+      heap_usage_ratio: 0,
+      cpu_usage_ratio: 0,
+      // Advanced Connection Pool metrics (camelCase for component compatibility)
+      peak_active_connections: peakActiveConnections,
+      peakActiveConnections,
+      peak_timestamp: peakTimestamp,
+      peakTimestamp,
+      connection_requests_per_second: connectionRequestsPerSecond,
+      connectionRequestsPerSecond,
+      pool_health_score: poolHealthScore,
+      poolHealthScore,
+      average_hold_time: Math.round(averageHoldTime * 100) / 100,
+      averageHoldTime: Math.round(averageHoldTime * 100) / 100,
+      waiting_threads: waitingThreads,
+      waitingThreads
     }
     
     console.log('🎯 Calculated new aggregated metrics:', newMetrics)
@@ -486,7 +517,7 @@ export default function Dashboard() {
         </header>
 
         {/* Primary Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <MetricCard
             title="QPS"
             value={aggregatedMetrics.qps.toString()}
@@ -495,66 +526,44 @@ export default function Dashboard() {
           />
           <MetricCard
             title="TPS"
-            value={aggregatedMetrics.tps.toString()}
+            value={(aggregatedMetrics.tps || 0).toString()}
             unit="tx/sec"
             isAnimated={isConnected}
           />
           <MetricCard
             title="Avg Latency"
-            value={aggregatedMetrics.avgLatency.toString()}
+            value={(aggregatedMetrics.avgLatency || 0).toString()}
             unit="ms"
             isAnimated={isConnected}
           />
           <MetricCard
-            title="Active Connections"
-            value={aggregatedMetrics.activeConnections.toString()}
-            unit="active"
-            isAnimated={isConnected}
-          />
-          <MetricCard
             title="Active Transactions"
-            value={aggregatedMetrics.transactionCount.toString()}
+            value={(aggregatedMetrics.transactionCount || 0).toString()}
             unit="transactions"
             isAnimated={isConnected}
           />
           <MetricCard
             title="Error Rate"
-            value={aggregatedMetrics.errorRate.toString()}
+            value={(aggregatedMetrics.error_rate || 0).toString()}
             unit="%"
             isAnimated={isConnected}
           />
         </div>
 
-        {/* Connection Pool Metrics */}
+        {/* Advanced Connection Pool Monitoring */}
         <div className="mb-8">
           <h2 className="text-xl font-semibold mb-4 text-green-400">
-            🏊 Connection Pool Status
+            🏊 Advanced Connection Pool Monitoring
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard
-              title="Active Connections"
-              value={aggregatedMetrics.activeConnections.toString()}
-              unit="connections"
-              isAnimated={isConnected}
-            />
-            <MetricCard
-              title="Idle Connections" 
-              value={aggregatedMetrics.idleConnections.toString()}
-              unit="connections"
-              isAnimated={isConnected}
-            />
-            <MetricCard
-              title="Max Pool Size"
-              value={aggregatedMetrics.maxConnections.toString()}
-              unit="connections"
-              isAnimated={isConnected}
-            />
-            <MetricCard
-              title="Pool Usage"
-              value={`${aggregatedMetrics.poolUsageRatio}%`}
-              unit={`(${aggregatedMetrics.activeConnections + aggregatedMetrics.idleConnections}/${aggregatedMetrics.maxConnections})`}
-              isAnimated={isConnected}
-            />
+          
+          {/* Connection Pool Real-time Chart */}
+          <div className="mb-6">
+            <ConnectionPoolChart aggregatedMetrics={aggregatedMetrics} />
+          </div>
+
+          {/* Connection Pool Details */}
+          <div className="mb-6">
+            <ConnectionPoolDetail aggregatedMetrics={aggregatedMetrics} />
           </div>
         </div>
 
