@@ -3,6 +3,7 @@ package io.kubedb.monitor.agent;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.matcher.ElementMatchers;
+import net.bytebuddy.asm.Advice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,54 +47,42 @@ public class KubeDBAgent {
         }
         
         try {
+            // 🚨 핵심 안전장치: Agent 로딩 중 오류 시 애플리케이션 정상 동작 보장
+            setupAgentFailsafe();
+            
             // 글로벌 MetricsCollector 초기화
             globalMetricsCollector = new MetricsCollector(config);
             
-            // ByteBuddy 기반 인터셉션 설정
-            initializeByteBuddyInterception(inst);
+            // ByteBuddy 기반 인터셉션 설정 (안전 모드)
+            initializeByteBuddyInterceptionSafely(inst);
             
-            // 런타임 DataSource 발견 시작
-            initializeRuntimeDiscovery(inst);
+            // 런타임 DataSource 발견 시작 (선택적)
+            initializeRuntimeDiscoveryIfSafe(inst);
             
-            // Spring Boot DataSource 감지 (5초 후)
-            java.util.concurrent.ScheduledExecutorService springDetector = 
-                java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-            springDetector.schedule(() -> {
-                try {
-                    SpringBootDataSourceDetector.detectAndRegisterDataSources();
-                    System.out.println("🌟 Spring Boot DataSource 감지 완료: " + 
-                                     SpringBootDataSourceDetector.getDetectedDataSourceCount() + "개 발견");
-                } catch (Exception e) {
-                    System.out.println("❌ Spring Boot DataSource 감지 실패: " + e.getMessage());
-                }
-            }, 5, java.util.concurrent.TimeUnit.SECONDS);
+            // Spring Boot DataSource 감지 (지연 실행, 안전 모드)
+            scheduleSpringBootDetectionSafely();
             
-            // 직접 DataSource 스캐너 시작 (더 공격적인 방법)
-            DirectDataSourceFinder.startPeriodicScanning();
+            // 직접 DataSource 스캐너 시작 (선택적)
+            startDirectDataSourceFinderIfSafe();
             
-            // HikariCP MXBean 강제 등록 시도 (지연 실행)
-            java.util.concurrent.ScheduledExecutorService mxbeanForcer = 
-                java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-            mxbeanForcer.schedule(() -> {
-                try {
-                    forceHikariCPMXBeanRegistration();
-                } catch (Exception e) {
-                    System.out.println("❌ HikariCP MXBean 강제 등록 실패: " + e.getMessage());
-                }
-            }, 75, java.util.concurrent.TimeUnit.SECONDS);
+            // HikariCP MXBean 강제 등록 시도 (선택적, 지연 실행)
+            scheduleHikariCPRegistrationSafely();
             
-            // HTTP 전송 테스트
-            testHttpTransmission(config);
+            // HTTP 전송 테스트 (안전 모드)
+            testHttpTransmissionSafely(config);
             
-            System.out.println("✅ ByteBuddy Agent started successfully");
+            System.out.println("✅ ByteBuddy Agent started successfully (safe mode)");
             System.out.println("📋 Monitoring databases: " + config.getSupportedDatabases());
             logger.info("ByteBuddy Agent started successfully");
             logger.info("Monitoring databases: {}", config.getSupportedDatabases());
             
         } catch (Exception e) {
             System.out.println("❌ ByteBuddy Agent initialization failed: " + e.getMessage());
-            logger.error("Failed to start ByteBuddy Agent", e);
-            e.printStackTrace();
+            System.out.println("🔄 Falling back to no-monitoring mode to ensure application stability");
+            logger.error("Failed to start ByteBuddy Agent, falling back to no-monitoring mode", e);
+            
+            // 폴백: Agent 완전 비활성화하여 애플리케이션 정상 동작 보장
+            disableAgentCompletely();
         }
     }
     
@@ -106,7 +95,142 @@ public class KubeDBAgent {
     }
     
     /**
-     * ByteBuddy 기반 JDBC 인터셉션 초기화
+     * Agent 안전장치 설정
+     */
+    private static void setupAgentFailsafe() {
+        // JVM 종료 시 Agent 리소스 정리
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                if (scheduler != null && !scheduler.isShutdown()) {
+                    scheduler.shutdown();
+                }
+            } catch (Exception e) {
+                // 조용히 종료
+            }
+        }));
+        
+        // UncaughtExceptionHandler 설정으로 Agent 오류가 애플리케이션에 영향주지 않도록
+        Thread.setDefaultUncaughtExceptionHandler((thread, exception) -> {
+            if (thread.getName().contains("KubeDB") || thread.getName().contains("Agent")) {
+                System.err.println("⚠️ [KubeDB] Agent thread error (suppressed): " + exception.getMessage());
+                // Agent 오류는 로깅만 하고 애플리케이션에 전파하지 않음
+            }
+        });
+    }
+    
+    /**
+     * ByteBuddy 기반 JDBC 인터셉션 초기화 (안전 모드)
+     */
+    private static void initializeByteBuddyInterceptionSafely(Instrumentation inst) {
+        try {
+            initializeByteBuddyInterception(inst);
+        } catch (Exception e) {
+            System.out.println("⚠️ ByteBuddy 인터셉션 실패, 모니터링 비활성화: " + e.getMessage());
+            throw e; // 상위로 전파하여 폴백 모드 활성화
+        }
+    }
+    
+    /**
+     * 런타임 DataSource 발견 초기화 (안전 모드)
+     */
+    private static void initializeRuntimeDiscoveryIfSafe(Instrumentation inst) {
+        try {
+            initializeRuntimeDiscovery(inst);
+        } catch (Exception e) {
+            System.out.println("⚠️ Runtime DataSource 발견 실패 (계속 진행): " + e.getMessage());
+            // 이 기능은 실패해도 계속 진행
+        }
+    }
+    
+    /**
+     * Spring Boot 감지 스케줄링 (안전 모드)
+     */
+    private static void scheduleSpringBootDetectionSafely() {
+        try {
+            java.util.concurrent.ScheduledExecutorService springDetector = 
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+            springDetector.schedule(() -> {
+                try {
+                    SpringBootDataSourceDetector.detectAndRegisterDataSources();
+                    System.out.println("🌟 Spring Boot DataSource 감지 완료: " + 
+                                     SpringBootDataSourceDetector.getDetectedDataSourceCount() + "개 발견");
+                } catch (Exception e) {
+                    System.out.println("⚠️ Spring Boot DataSource 감지 실패 (무시): " + e.getMessage());
+                }
+            }, 10, java.util.concurrent.TimeUnit.SECONDS); // 초기화 대기 시간 증가
+        } catch (Exception e) {
+            System.out.println("⚠️ Spring Boot 감지 스케줄링 실패 (무시): " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 직접 DataSource 스캐너 시작 (안전 모드)
+     */
+    private static void startDirectDataSourceFinderIfSafe() {
+        try {
+            DirectDataSourceFinder.startPeriodicScanning();
+        } catch (Exception e) {
+            System.out.println("⚠️ 직접 DataSource 스캐너 실패 (무시): " + e.getMessage());
+        }
+    }
+    
+    /**
+     * HikariCP 등록 스케줄링 (안전 모드)
+     */
+    private static void scheduleHikariCPRegistrationSafely() {
+        try {
+            java.util.concurrent.ScheduledExecutorService mxbeanForcer = 
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+            mxbeanForcer.schedule(() -> {
+                try {
+                    forceHikariCPMXBeanRegistration();
+                } catch (Exception e) {
+                    System.out.println("⚠️ HikariCP MXBean 강제 등록 실패 (무시): " + e.getMessage());
+                }
+            }, 90, java.util.concurrent.TimeUnit.SECONDS); // 더 긴 대기 시간
+        } catch (Exception e) {
+            System.out.println("⚠️ HikariCP 등록 스케줄링 실패 (무시): " + e.getMessage());
+        }
+    }
+    
+    /**
+     * HTTP 전송 테스트 (안전 모드)
+     */
+    private static void testHttpTransmissionSafely(AgentConfig config) {
+        try {
+            testHttpTransmission(config);
+        } catch (Exception e) {
+            System.out.println("⚠️ HTTP 전송 테스트 실패 (무시): " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Agent 완전 비활성화 (폴백)
+     */
+    private static void disableAgentCompletely() {
+        try {
+            // 설정을 비활성화로 변경
+            if (config != null) {
+                // AgentConfig의 enabled를 false로 설정 (리플렉션 사용)
+                java.lang.reflect.Field enabledField = config.getClass().getDeclaredField("enabled");
+                enabledField.setAccessible(true);
+                enabledField.set(config, false);
+            }
+            
+            // 모든 스케줄러 중지
+            if (scheduler != null && !scheduler.isShutdown()) {
+                scheduler.shutdown();
+            }
+            
+            System.out.println("✅ Agent 완전 비활성화 완료 - 애플리케이션 정상 동작 보장");
+            
+        } catch (Exception e) {
+            System.out.println("⚠️ Agent 비활성화 중 오류 (무시): " + e.getMessage());
+        }
+    }
+    
+    /**
+     * ByteBuddy 기반 JDBC 인터셉션 초기화 (기존 메서드)
      */
     private static void initializeByteBuddyInterception(Instrumentation inst) {
         System.out.println("🔧 ByteBuddy Agent Builder 설정 중...");
@@ -115,16 +239,17 @@ public class KubeDBAgent {
             new AgentBuilder.Default()
                 .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                 .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
+                .with(AgentBuilder.Listener.StreamWriting.toSystemOut())
                 .ignore(ElementMatchers.nameStartsWith("net.bytebuddy.")
                        .or(ElementMatchers.nameStartsWith("io.kubedb.monitor.agent.")))
                 
-                // 모든 Connection 구현체 인터셉트 (HikariCP Proxy 포함)
+                // 🔗 Connection 클래스 인터셉션 (Connection Pool 모니터링에 필요)
                 .type(ElementMatchers.isSubTypeOf(java.sql.Connection.class)
                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
                      .or(ElementMatchers.nameContains("HikariProxy"))
                      .or(ElementMatchers.nameContains("PgConnection")))
                 .transform((builder, type, classLoader, module, protectionDomain) -> {
-                    System.out.println("🔍 Connection 클래스 발견: " + type.getName());
+                    System.out.println("🔗 Connection 클래스 발견: " + type.getName());
                     return builder
                         .method(ElementMatchers.named("prepareStatement")
                                .or(ElementMatchers.named("createStatement"))
@@ -135,46 +260,55 @@ public class KubeDBAgent {
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })
                 
-                // 모든 PreparedStatement 구현체 인터셉트 (HikariCP Proxy 포함)
-                .type(ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)
-                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                     .or(ElementMatchers.nameContains("HikariProxy"))
-                     .or(ElementMatchers.nameContains("PgPreparedStatement")))
+                // 🎯 PostgreSQL Statement 클래스 타겟팅
+                .type(ElementMatchers.named("org.postgresql.jdbc.PgPreparedStatement")
+                     .or(ElementMatchers.named("org.postgresql.jdbc.PgStatement"))
+                     .or(ElementMatchers.named("org.postgresql.jdbc.PgCallableStatement")))
                 .transform((builder, type, classLoader, module, protectionDomain) -> {
-                    System.out.println("🔍 PreparedStatement 클래스 발견: " + type.getName());
+                    System.out.println("🎯 [PostgreSQL Statement] 발견: " + type.getName());
                     return builder
                         .method(ElementMatchers.named("execute")
                                .or(ElementMatchers.named("executeQuery"))
                                .or(ElementMatchers.named("executeUpdate"))
-                               .or(ElementMatchers.named("executeBatch")))
+                               .or(ElementMatchers.named("executeBatch"))
+                               .and(ElementMatchers.isPublic()))
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })
                 
-                // 모든 Statement 구현체 인터셉트 (HikariCP Proxy 포함)
-                .type(ElementMatchers.isSubTypeOf(java.sql.Statement.class)
-                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                     .and(ElementMatchers.not(ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)))
-                     .or(ElementMatchers.nameContains("HikariProxy"))
-                     .or(ElementMatchers.nameContains("PgStatement")))
+                // 🔍 일반 JDBC Statement 구현체 (정확한 이름으로만 매칭)
+                .type(ElementMatchers.nameEndsWith("PreparedStatement")
+                     .and(ElementMatchers.not(ElementMatchers.nameContains("Connection")))
+                     .and(ElementMatchers.not(ElementMatchers.nameContains("Pool")))
+                     .and(ElementMatchers.not(ElementMatchers.nameContains("DataSource"))))
                 .transform((builder, type, classLoader, module, protectionDomain) -> {
-                    System.out.println("🔍 Statement 클래스 발견: " + type.getName());
+                    System.out.println("🔍 [일반 PreparedStatement] 발견: " + type.getName());
                     return builder
                         .method(ElementMatchers.named("execute")
                                .or(ElementMatchers.named("executeQuery"))
-                               .or(ElementMatchers.named("executeUpdate")))
+                               .or(ElementMatchers.named("executeUpdate"))
+                               .or(ElementMatchers.named("executeBatch"))
+                               .and(ElementMatchers.isPublic()))
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })
                 
-                // 모든 DataSource 구현체 인터셉트 (Connection Pool 감지)
-                .type(ElementMatchers.isSubTypeOf(javax.sql.DataSource.class)
-                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                     .and(ElementMatchers.not(ElementMatchers.nameContains("Proxy"))))
+                // 🔍 일반 Statement 구현체 (정확한 이름으로만 매칭)
+                .type(ElementMatchers.nameEndsWith("Statement")
+                     .and(ElementMatchers.not(ElementMatchers.nameContains("Connection")))
+                     .and(ElementMatchers.not(ElementMatchers.nameContains("Pool")))
+                     .and(ElementMatchers.not(ElementMatchers.nameContains("DataSource")))
+                     .and(ElementMatchers.not(ElementMatchers.nameEndsWith("PreparedStatement"))))
                 .transform((builder, type, classLoader, module, protectionDomain) -> {
-                    System.out.println("🔗 DataSource 클래스 발견: " + type.getName());
+                    System.out.println("🔍 [일반 Statement] 발견: " + type.getName());
                     return builder
-                        .method(ElementMatchers.named("getConnection"))
-                        .intercept(MethodDelegation.to(DataSourceInterceptor.class));
+                        .method(ElementMatchers.named("execute")
+                               .or(ElementMatchers.named("executeQuery"))
+                               .or(ElementMatchers.named("executeUpdate"))
+                               .and(ElementMatchers.isPublic()))
+                        .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })
+                
+                // 🚨 DataSource 인터셉션도 제거 - HikariCP 초기화 완전 보호
+                // getConnection() 인터셉션이 Connection Pool 초기화 간섭 방지
                 
                 .installOn(inst);
                 
@@ -195,15 +329,15 @@ public class KubeDBAgent {
         dataSourceDiscovery = new RuntimeDataSourceDiscovery(inst, config);
         scheduler = Executors.newScheduledThreadPool(2);
         
-        // DataSource 발견 작업을 주기적으로 실행 (5초마다)
-        scheduler.scheduleAtFixedRate(() -> {
+        // DataSource 발견 작업을 한 번만 실행 (10초 후 - 애플리케이션 로딩 완료 대기)
+        scheduler.schedule(() -> {
             try {
                 dataSourceDiscovery.discoverAndWrapDataSources();
             } catch (Exception e) {
                 // 조용히 실패 (정상적일 수 있음)
                 logger.debug("DataSource discovery error (may be normal): {}", e.getMessage());
             }
-        }, 5, 5, TimeUnit.SECONDS);
+        }, 10, TimeUnit.SECONDS);
         
         System.out.println("✅ Runtime DataSource Discovery 시작됨");
     }
@@ -253,23 +387,29 @@ public class KubeDBAgent {
     }
     
     /**
-     * HikariCP MXBean 강제 등록 시도
+     * HikariCP MXBean 강제 등록 시도 (한 번만 실행)
      */
     private static void forceHikariCPMXBeanRegistration() {
         System.out.println("🔧 HikariCP MXBean 강제 등록 시도 시작...");
         
         try {
-            // 모든 로드된 클래스에서 HikariDataSource 찾기
+            // 모든 로드된 클래스에서 HikariDataSource 찾기 (한 번만)
             Class<?>[] loadedClasses = instrumentation.getAllLoadedClasses();
             
+            boolean found = false;
             for (Class<?> clazz : loadedClasses) {
                 if (clazz.getName().equals("com.zaxxer.hikari.HikariDataSource")) {
                     System.out.println("✅ HikariDataSource 클래스 발견: " + clazz.getName());
                     
                     // Static 필드나 인스턴스에서 HikariDataSource 객체 찾기
                     findAndRegisterHikariInstances(clazz);
+                    found = true;
                     break;
                 }
+            }
+            
+            if (!found) {
+                System.out.println("⚠️ HikariDataSource 클래스를 찾을 수 없음");
             }
             
             // Spring ApplicationContext를 통한 접근 시도

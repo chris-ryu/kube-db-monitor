@@ -52,13 +52,13 @@ public class MetricsCollector {
     public MetricsCollector(AgentConfig config) {
         this.config = config;
         this.transmitter = new HttpMetricsTransmitter(config);
-        this.poolMonitor = new ConnectionPoolMonitor(2); // 2초 간격으로 Pool 메트릭 수집 (개선)
+        this.poolMonitor = new ConnectionPoolMonitor(1); // 1초 간격으로 Pool 메트릭 수집 (더 빠른 업데이트)
         
         // Long-running transaction 모니터링 스케줄러 시작 (3초마다 체크 - 개선)
         transactionMonitor.scheduleAtFixedRate(this::checkLongRunningTransactions, 3, 3, TimeUnit.SECONDS);
         
-        // Connection Pool 메트릭 주기적 전송 (5초마다 - 개선)
-        transactionMonitor.scheduleAtFixedRate(this::sendConnectionPoolMetrics, 5, 5, TimeUnit.SECONDS);
+        // Connection Pool 메트릭 주기적 전송 (1초마다 - 더 빠른 업데이트)
+        transactionMonitor.scheduleAtFixedRate(this::sendConnectionPoolMetrics, 1, 1, TimeUnit.SECONDS);
         
         // Connection Pool 모니터링 시작
         poolMonitor.start();
@@ -88,6 +88,9 @@ public class MetricsCollector {
         if (executionTimeMs > maxQueryTime) {
             maxQueryTime = executionTimeMs;
         }
+        
+        // 활성 트랜잭션의 쿼리 정보 업데이트
+        updateActiveTransactionQuery(sql, connectionId, threadName, executionTimeMs);
         
         // Connection 요청 추적 (새로운 기능)
         if (poolMonitor != null) {
@@ -329,13 +332,16 @@ public class MetricsCollector {
                 logger.warning(String.format("[KubeDB] Long-running transaction detected: %s (%dms) on connection %s", 
                     txInfo.transactionId, durationMs, txInfo.connectionId));
                 
-                // HTTP 전송
+                // HTTP 전송 (쿼리 정보 포함)
                 transmitter.transmitLongRunningTransactionAlert(
                     txInfo.transactionId, 
                     txInfo.connectionId, 
                     txInfo.threadName, 
                     durationMs, 
-                    txInfo.startTime
+                    txInfo.startTime,
+                    txInfo.currentQuery,
+                    txInfo.storedProcedureName,
+                    txInfo.queryHistory
                 );
             }
         }
@@ -381,6 +387,114 @@ public class MetricsCollector {
     }
     
     /**
+     * 활성 트랜잭션의 쿼리 정보 업데이트
+     */
+    public void updateActiveTransactionQuery(String sql, String connectionId, String threadName, long executionTimeMs) {
+        try {
+            String sqlType = extractSqlType(sql);
+            String storedProcedure = extractStoredProcedureName(sql);
+            
+            for (TransactionInfo txInfo : activeTransactions.values()) {
+                // 동일한 연결이나 스레드의 트랜잭션 찾기
+                if (connectionId.equals(txInfo.connectionId) || threadName.equals(txInfo.threadName)) {
+                    // 이전 쿼리를 히스토리에 추가
+                    if (txInfo.currentQuery != null) {
+                        TransactionInfo.QueryInfo queryInfo = new TransactionInfo.QueryInfo(
+                            txInfo.currentQuery, 
+                            txInfo.lastQueryStartTime, 
+                            executionTimeMs, 
+                            sqlType
+                        );
+                        txInfo.queryHistory.add(queryInfo);
+                        
+                        // 히스토리 크기 제한 (최대 10개)
+                        if (txInfo.queryHistory.size() > 10) {
+                            txInfo.queryHistory.remove(0);
+                        }
+                    }
+                    
+                    // 현재 쿼리 정보 업데이트
+                    txInfo.lastExecutedQuery = txInfo.currentQuery;
+                    txInfo.currentQuery = sql;
+                    txInfo.lastQueryStartTime = System.currentTimeMillis();
+                    
+                    if (storedProcedure != null) {
+                        txInfo.storedProcedureName = storedProcedure;
+                    }
+                    
+                    logger.fine(String.format("[KubeDB] 트랜잭션 %s의 쿼리 정보 업데이트: %s", 
+                               txInfo.transactionId, 
+                               sql.length() > 50 ? sql.substring(0, 50) + "..." : sql));
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            logger.warning("[KubeDB] 트랜잭션 쿼리 정보 업데이트 실패: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * SQL에서 타입 추출 (SELECT, INSERT, UPDATE, DELETE, CALL 등)
+     */
+    private String extractSqlType(String sql) {
+        if (sql == null || sql.trim().isEmpty()) {
+            return "UNKNOWN";
+        }
+        
+        String trimmedSql = sql.trim().toUpperCase();
+        String[] tokens = trimmedSql.split("\\s+", 2);
+        
+        if (tokens.length > 0) {
+            String firstToken = tokens[0];
+            switch (firstToken) {
+                case "SELECT": return "SELECT";
+                case "INSERT": return "INSERT";
+                case "UPDATE": return "UPDATE";
+                case "DELETE": return "DELETE";
+                case "CALL": return "STORED_PROCEDURE";
+                case "EXEC": return "STORED_PROCEDURE";
+                case "EXECUTE": return "STORED_PROCEDURE";
+                case "BEGIN": return "TRANSACTION";
+                case "COMMIT": return "TRANSACTION";
+                case "ROLLBACK": return "TRANSACTION";
+                default: return firstToken;
+            }
+        }
+        
+        return "UNKNOWN";
+    }
+    
+    /**
+     * SQL에서 Stored Procedure 이름 추출
+     */
+    private String extractStoredProcedureName(String sql) {
+        if (sql == null || sql.trim().isEmpty()) {
+            return null;
+        }
+        
+        String trimmedSql = sql.trim().toUpperCase();
+        
+        // CALL, EXEC, EXECUTE로 시작하는 경우 프로시저 이름 추출
+        if (trimmedSql.startsWith("CALL ") || 
+            trimmedSql.startsWith("EXEC ") || 
+            trimmedSql.startsWith("EXECUTE ")) {
+            
+            String[] tokens = trimmedSql.split("\\s+");
+            if (tokens.length >= 2) {
+                String procName = tokens[1];
+                // 괄호가 있으면 제거
+                int parenIndex = procName.indexOf('(');
+                if (parenIndex > 0) {
+                    procName = procName.substring(0, parenIndex);
+                }
+                return procName;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
      * Connection Pool 메트릭을 HTTP로 전송
      */
     private void sendConnectionPoolMetrics() {
@@ -421,5 +535,29 @@ public class MetricsCollector {
         String threadName;
         long startTime;
         boolean alreadyReported = false;
+        
+        // 쿼리 정보 추가
+        String lastExecutedQuery;
+        String currentQuery;
+        String storedProcedureName;
+        long lastQueryStartTime;
+        java.util.List<QueryInfo> queryHistory = new java.util.ArrayList<>();
+        
+        /**
+         * 쿼리 정보 클래스
+         */
+        static class QueryInfo {
+            String query;
+            long startTime;
+            long executionTime;
+            String queryType;
+            
+            QueryInfo(String query, long startTime, long executionTime, String queryType) {
+                this.query = query;
+                this.startTime = startTime;
+                this.executionTime = executionTime;
+                this.queryType = queryType;
+            }
+        }
     }
 }

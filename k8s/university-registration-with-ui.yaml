@@ -55,7 +55,21 @@ spec:
         # Spring Boot 프로파일
         - name: SPRING_PROFILES_ACTIVE
           value: "development"
-        # Java 옵션과 KubeDB Agent (안전 모드)
+        # KubeDB Monitor Agent 환경 변수 설정
+        - name: KUBEDB_MONITOR_ENABLED
+          value: "true"
+        - name: KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS
+          value: "5000"  # 5초 임계값 (환경에 따라 조정 가능)
+        - name: KUBEDB_MONITOR_SLOW_QUERY_THRESHOLD_MS
+          value: "100"
+        - name: KUBEDB_MONITOR_SAMPLING_RATE
+          value: "1.0"
+        - name: KUBEDB_MONITOR_COLLECTOR_ENDPOINT
+          value: "http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
+        - name: KUBEDB_MONITOR_LOG_LEVEL
+          value: "WARN"
+        
+        # Java 옵션 (Agent 테스트를 위해 재활성화)
         - name: JAVA_OPTS
           value: "-Xmx512m -Xms256m -XX:+UseG1GC -javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=db-types=postgresql,sampling-rate=1.0,slow-query-threshold=100,collector-type=http,collector-endpoint=http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics,log-level=WARN,postgresql-fix-unknown-types-value=true,postgresql-strict-compatibility=true,safe-transformation-mode=true"
         

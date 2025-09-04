@@ -27,6 +27,9 @@ public class RuntimeDataSourceDiscovery {
     // 이미 처리된 DataSource를 추적하여 중복 처리 방지
     private final Set<Object> processedDataSources = ConcurrentHashMap.newKeySet();
     
+    // DataSource 검색이 이미 완료되었는지 추적
+    private volatile boolean discoveryCompleted = false;
+    
     // 지원하는 DataSource 클래스 이름들
     private static final Set<String> DATASOURCE_CLASSES = Set.of(
         "com.zaxxer.hikari.HikariDataSource",
@@ -49,18 +52,33 @@ public class RuntimeDataSourceDiscovery {
     }
     
     /**
-     * JVM을 스캔하여 DataSource를 찾고 프록시로 감싸기
+     * JVM을 스캔하여 DataSource를 찾고 프록시로 감싸기 (한 번만 실행)
      */
     public void discoverAndWrapDataSources() {
+        // 이미 검색이 완료된 경우 건너뛰기
+        if (discoveryCompleted) {
+            logger.debug("DataSource discovery already completed, skipping");
+            return;
+        }
+        
         try {
+            logger.info("Starting DataSource discovery (one-time execution)");
             Class<?>[] loadedClasses = instrumentation.getAllLoadedClasses();
             
+            int foundDataSources = 0;
             for (Class<?> clazz : loadedClasses) {
                 if (isDataSourceClass(clazz)) {
                     System.out.println("🔍 DataSource 클래스 발견: " + clazz.getName());
                     scanForDataSourceInstances(clazz);
+                    foundDataSources++;
                 }
             }
+            
+            // 검색 완료 표시
+            discoveryCompleted = true;
+            logger.info("DataSource discovery completed. Found {} DataSource classes.", foundDataSources);
+            System.out.println("✅ DataSource 검색 완료: " + foundDataSources + "개 클래스 발견");
+            
         } catch (Exception e) {
             logger.debug("DataSource discovery error: {}", e.getMessage());
         }

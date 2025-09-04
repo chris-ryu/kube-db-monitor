@@ -10,7 +10,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.concurrent.Callable;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.sql.DataSource;
@@ -29,8 +29,52 @@ public class UniversalJDBCInterceptor {
     private static volatile HttpMetricsTransmitter httpTransmitter;
     private static volatile ConnectionPoolMonitor poolMonitor;
     
+    // 🚨 지연 인터셉션: HikariCP와 PostgreSQL 초기화 완료까지 대기
+    private static volatile boolean databaseInitializationComplete = false;
+    private static final long INITIALIZATION_WAIT_TIME_MS = 30000; // 30초 대기
+    private static long agentStartTime = System.currentTimeMillis();
+    
     // 이미 등록된 DataSource를 추적하여 중복 등록 방지
     private static final Set<DataSource> registeredDataSources = ConcurrentHashMap.newKeySet();
+    
+    // 트랜잭션별 쿼리 히스토리 저장 (connection_id -> 쿼리 리스트)
+    private static final Map<String, List<QueryHistoryEntry>> transactionQueryHistory = new ConcurrentHashMap<>();
+    
+    // 실행 중인 쿼리 정보 저장 (thread_id -> 현재 실행 중인 SQL 정보)
+    private static final Map<String, ActiveQueryInfo> activeQueries = new ConcurrentHashMap<>();
+    
+    // Connection ID 기반 실행 중인 쿼리 매핑 (connection_id -> ActiveQueryInfo)
+    private static final Map<String, ActiveQueryInfo> activeQueriesByConnection = new ConcurrentHashMap<>();
+    
+    // 실행 중인 쿼리 정보 클래스
+    private static class ActiveQueryInfo {
+        final String sql;
+        final String connectionId;
+        final long startTime;
+        final String queryType;
+        
+        ActiveQueryInfo(String sql, String connectionId, String queryType) {
+            this.sql = sql;
+            this.connectionId = connectionId;
+            this.startTime = System.currentTimeMillis();
+            this.queryType = queryType;
+        }
+    }
+    
+    // 쿼리 히스토리 엔트리
+    private static class QueryHistoryEntry {
+        final String sql;
+        final long timestamp;
+        final String queryType;
+        final long executionTime;
+        
+        QueryHistoryEntry(String sql, String queryType, long executionTime) {
+            this.sql = sql;
+            this.timestamp = System.currentTimeMillis();
+            this.queryType = queryType;
+            this.executionTime = executionTime;
+        }
+    }
     
     // DB 타입 열거형
     public enum DatabaseType {
@@ -46,6 +90,16 @@ public class UniversalJDBCInterceptor {
             @This Object target,
             @AllArguments Object[] args,
             @SuperCall Callable<?> callable) throws Exception {
+        
+        // PostgreSQL 시스템 메서드 제외 필터 (우선 처리)
+        if (isSystemMethod(method.getName())) {
+            return callable.call();
+        }
+        
+        // 🚨 지연 인터셉션: 데이터베이스 초기화 완료 대기
+        if (!isDatabaseInitializationReady()) {
+            return callable.call();
+        }
         
         // MetricsCollector, HttpTransmitter, ConnectionPoolMonitor 지연 초기화
         if (metricsCollector == null) {
@@ -71,8 +125,39 @@ public class UniversalJDBCInterceptor {
         String methodName = method.getName();
         String className = target.getClass().getSimpleName();
         
+        // 🚨 Long Running Transaction SQL 추출 기능 일시 비활성화 - PostgreSQL 호환성 우선
+        // 이 기능은 나중에 별도의 방식으로 다시 구현 예정
+        /*
+        // 🚀 SQL 실행 시작시 ActiveQueryInfo 저장 (Long Running Transaction에서 사용)
+        String connectionId = null;
+        String threadId = null;
+        if (methodName.contains("execute") && !methodName.contains("Batch")) {
+            try {
+                connectionId = getConnectionId(target);
+                threadId = Thread.currentThread().getName() + "-" + Thread.currentThread().getId();
+                String sql = extractSQL(target, args);
+                
+                if (sql != null && !sql.contains("[SQL extraction failed]") && !sql.trim().isEmpty()) {
+                    ActiveQueryInfo queryInfo = new ActiveQueryInfo(sql, connectionId, extractSQLType(sql));
+                    activeQueries.put(threadId, queryInfo);
+                    activeQueriesByConnection.put(connectionId, queryInfo);
+                    System.out.println("🚀 SQL 실행 시작 저장 (Thread + Connection): " + threadId + " & " + connectionId + " -> " + sql.substring(0, Math.min(50, sql.length())));
+                }
+            } catch (Exception e) {
+                // SQL 실행 시작 시점 저장 실패해도 메인 로직에 영향 없음
+                System.out.println("⚠️ SQL 실행 시작 시점 정보 저장 실패: " + e.getMessage());
+            }
+        }
+        */
+        
         try {
-            System.out.println("🔍 JDBC 메서드 인터셉트: " + className + "." + methodName);
+            // SQL 실행 관련 메서드만 로깅
+            if (methodName.contains("execute") || methodName.contains("prepare") || methodName.contains("commit") || methodName.contains("rollback")) {
+                System.out.println("🔍 JDBC 메서드 인터셉트: " + className + "." + methodName + " (args: " + (args != null ? args.length : 0) + ")");
+                if (args != null && args.length > 0 && args[0] instanceof String) {
+                    System.out.println("   SQL: " + args[0]);
+                }
+            }
             
             Object result = callable.call();
             long executionTime = System.nanoTime() - startTime;
@@ -84,6 +169,9 @@ public class UniversalJDBCInterceptor {
             
         } catch (Exception e) {
             long executionTime = System.nanoTime() - startTime;
+            
+            // 🚨 Long Running Transaction 관련 코드 제거됨
+            
             handleMethodExecution(target, method, args, executionTime, false, e);
             throw e;
         }
@@ -150,11 +238,28 @@ public class UniversalJDBCInterceptor {
                                                long executionTime, boolean success, Exception error, 
                                                DatabaseType dbType) {
         try {
+            String className = target.getClass().getName();
+            boolean isHikariProxy = className.contains("HikariProxy");
+            
+            logger.debug("[KubeDB] ⚡ handleStatementExecution 호출됨! Method: {}, Target: {}, HikariCP: {}", 
+                        method.getName(), target.getClass().getSimpleName(), isHikariProxy);
+            
+            System.out.println("🎯 SQL 실행 감지 (HikariCP: " + isHikariProxy + "): " + className + "." + method.getName());
+            
             String sql = extractSQL(target, args);
+            
+            // HikariCP 프록시의 경우 추가 SQL 추출 시도
+            if ((sql == null || sql.trim().isEmpty()) && isHikariProxy) {
+                sql = extractSqlFromHikariProxy(target);
+                System.out.println("🔄 HikariCP 전용 SQL 추출 시도: " + (sql != null ? "성공" : "실패"));
+            }
+            
             String connectionId = getConnectionId(target);
             String threadName = Thread.currentThread().getName();
             
             System.out.println("🔍 SQL 실행 감지: " + sql + " (" + (executionTime / 1_000_000) + "ms)");
+            System.out.println("   Connection ID: " + connectionId + ", Thread: " + threadName);
+            logger.debug("[KubeDB] SQL 실행 감지: {} ({}ms)", sql, executionTime / 1_000_000);
             
             // PreparedStatement 생성 관련 잘못된 메트릭 필터링
             // (기존 문자열과 신규 추출 실패 문자열 모두 처리)
@@ -174,9 +279,37 @@ public class UniversalJDBCInterceptor {
             // DB별 특화 처리
             sql = preprocessSQL(sql, dbType);
             
+            // 🔥 SQL 실행 완료시 ActiveQueryInfo 관리 (Long Running Transaction에서 사용)
+            if (sql != null && !sql.contains("[SQL extraction failed]")) {
+                String threadId = Thread.currentThread().getName() + "-" + Thread.currentThread().getId();
+                
+                // 실행 완료시에 ActiveQueryInfo 제거 (실행 시작은 별도 위치에서 처리)
+                if (executionTimeMs > 0) {
+                    // 실행 완료시 Thread ID와 Connection ID 둘 다 제거
+                    activeQueries.remove(threadId);
+                    activeQueriesByConnection.remove(connectionId);
+                    System.out.println("🏁 실행 완료 SQL 제거 (Thread + Connection): " + threadId + " & " + connectionId + " (" + executionTimeMs + "ms)");
+                }
+            }
+            
+            // 쿼리 히스토리에 기록 (성공한 SQL만)
+            if (sql != null && !sql.contains("[SQL extraction failed]") && success) {
+                recordQueryInHistory(connectionId, sql, extractSQLType(sql), executionTimeMs);
+            }
+            
+            // 트랜잭션 시작 감지 및 기록
+            handleTransactionBeginIfNeeded(sql, connectionId, threadName);
+            
             // 메트릭 수집 (기존 방식 유지)
             if (success) {
+                System.out.println("✅ SQL 메트릭 수집 중: " + sql);
                 metricsCollector.recordQuery(sql, executionTime, connectionId, threadName);
+                
+                // Long running transaction에 현재 실행 중인 쿼리 정보 업데이트
+                System.out.println("🔄 Active transaction에 쿼리 정보 업데이트 중...");
+                metricsCollector.updateActiveTransactionQuery(sql, connectionId, threadName, executionTime / 1_000_000);
+                
+                System.out.println("✅ SQL 메트릭 수집 완료");
             } else {
                 // 오류 처리는 MetricsCollector 메서드 시그니처 확인 필요
                 logger.warn("SQL execution failed: {}, Error: {}", sql, error.getMessage());
@@ -240,6 +373,9 @@ public class UniversalJDBCInterceptor {
             
             System.out.println("🔍 트랜잭션 커밋: " + connectionId + " (" + (executionTime / 1_000_000) + "ms)");
             
+            // 트랜잭션 커밋시 쿼리 히스토리 정리
+            clearTransactionHistory(connectionId);
+            
             metricsCollector.recordCommit(executionTime, connectionId, transactionId);
             
         } catch (Exception e) {
@@ -257,6 +393,9 @@ public class UniversalJDBCInterceptor {
             String transactionId = "tx-" + System.currentTimeMillis();
             
             System.out.println("🔍 트랜잭션 롤백: " + connectionId + " (" + (executionTime / 1_000_000) + "ms)");
+            
+            // 트랜잭션 롤백시 쿼리 히스토리 정리
+            clearTransactionHistory(connectionId);
             
             metricsCollector.recordRollback(executionTime, connectionId, transactionId);
             
@@ -317,6 +456,29 @@ public class UniversalJDBCInterceptor {
             // Statement.execute(String sql) 형태
             if (args != null && args.length > 0 && args[0] instanceof String) {
                 return (String) args[0];
+            }
+            
+            // HikariCP 프록시 객체 특별 처리 (최우선)
+            String className = target.getClass().getName();
+            if (className.contains("HikariProxy")) {
+                System.out.println("🎯 HikariCP 프록시에서 SQL 추출 시도: " + className);
+                String hikariSQL = extractSqlFromHikariProxy(target);
+                if (hikariSQL != null && !hikariSQL.trim().isEmpty() && !hikariSQL.equals("null")) {
+                    System.out.println("✅ HikariCP SQL 추출 성공: " + hikariSQL.substring(0, Math.min(50, hikariSQL.length())) + "...");
+                    return hikariSQL;
+                } else {
+                    System.out.println("❌ HikariCP SQL 추출 실패, 대체 방법 시도");
+                    // 실패시에도 toString에서 SQL을 찾아서 반환
+                    String toString = target.toString();
+                    if (toString.contains("wrapping ") && toString.toLowerCase().matches(".*\\b(select|insert|update|delete|create|drop|alter)\\b.*")) {
+                        int start = toString.indexOf("wrapping ") + 9;
+                        String fallbackSQL = toString.substring(start).trim();
+                        System.out.println("🔄 대체 방법으로 SQL 추출: " + fallbackSQL.substring(0, Math.min(60, fallbackSQL.length())));
+                        return fallbackSQL;
+                    }
+                    // 최후 수단: 기본 정보 제공
+                    return "[SQL extraction failed] " + className + " - " + toString.substring(0, Math.min(80, toString.length()));
+                }
             }
             
             // PreparedStatement의 경우 실제 SQL 추출 시도
@@ -420,22 +582,63 @@ public class UniversalJDBCInterceptor {
     }
     
     /**
-     * Connection ID 추출
+     * Connection ID 추출 (HikariCP underlying connection 기반)
      */
     private static String getConnectionId(Object target) {
         try {
+            Connection connection = null;
+            
             if (target instanceof Connection) {
-                return target.toString();
-            }
-            
-            // Statement에서 Connection 추출
-            if (target instanceof java.sql.Statement) {
+                connection = (Connection) target;
+            } else if (target instanceof java.sql.Statement) {
                 java.sql.Statement stmt = (java.sql.Statement) target;
-                Connection conn = stmt.getConnection();
-                return conn != null ? conn.toString() : "unknown-connection";
+                connection = stmt.getConnection();
             }
             
-            return target.toString();
+            if (connection != null) {
+                // HikariCP 프록시인 경우 실제 underlying connection 추출
+                if (connection.getClass().getName().contains("HikariProxy")) {
+                    try {
+                        // Method 1: delegate 필드를 통한 underlying connection 접근
+                        java.lang.reflect.Field delegateField = connection.getClass().getDeclaredField("delegate");
+                        delegateField.setAccessible(true);
+                        Object delegate = delegateField.get(connection);
+                        
+                        if (delegate instanceof Connection) {
+                            Connection underlyingConn = (Connection) delegate;
+                            // PostgreSQL connection의 고유 정보 추출
+                            String connString = underlyingConn.toString();
+                            
+                            // PostgreSQL connection에서 더 안정적인 식별자 추출
+                            if (connString.contains("PgConnection")) {
+                                // PgConnection의 hashCode나 고유 정보 사용
+                                return "pg-conn-" + Integer.toHexString(underlyingConn.hashCode());
+                            }
+                            
+                            return "underlying-" + Integer.toHexString(underlyingConn.hashCode());
+                        }
+                    } catch (Exception e) {
+                        // Method 2: URL 기반 연결 정보 + 스레드 정보로 고유 ID 생성
+                        try {
+                            DatabaseMetaData metaData = connection.getMetaData();
+                            String url = metaData.getURL();
+                            String user = metaData.getUserName();
+                            
+                            // URL과 사용자명을 기반으로 안정적인 connection ID 생성
+                            String baseId = url + "-" + user;
+                            return "stable-conn-" + Integer.toHexString(baseId.hashCode());
+                        } catch (Exception metaEx) {
+                            // Fallback: HikariCP proxy의 hashCode 사용
+                            return "hikari-proxy-" + Integer.toHexString(connection.hashCode());
+                        }
+                    }
+                }
+                
+                // 일반 Connection인 경우
+                return "conn-" + Integer.toHexString(connection.hashCode());
+            }
+            
+            return "target-" + Integer.toHexString(target.hashCode());
             
         } catch (Exception e) {
             return "connection-id-error: " + e.getMessage();
@@ -923,5 +1126,543 @@ public class UniversalJDBCInterceptor {
             System.out.println("❌ DataSource 등록 실패: " + e.getMessage());
         }
         return false;
+    }
+    
+    /**
+     * SQL에서 트랜잭션 시작 감지 및 기록
+     */
+    private static void handleTransactionBeginIfNeeded(String sql, String connectionId, String threadName) {
+        if (sql == null || metricsCollector == null) {
+            return;
+        }
+        
+        String trimmedSql = sql.trim().toUpperCase();
+        
+        // 명시적 트랜잭션 시작 감지
+        if (trimmedSql.startsWith("BEGIN") || 
+            trimmedSql.startsWith("START TRANSACTION") || 
+            trimmedSql.contains("BEGIN TRANSACTION")) {
+            
+            String transactionId = generateTransactionId(connectionId, threadName);
+            metricsCollector.recordTransactionBegin(connectionId, transactionId);
+            
+            logger.info("[KubeDB] 명시적 트랜잭션 시작 감지: {} on connection {}", transactionId, connectionId);
+        } 
+        // 첫 번째 DML 실행 시 암시적 트랜잭션 시작 (autoCommit=false인 경우)
+        else if (isDMLStatement(trimmedSql)) {
+            // 이미 트랜잭션이 시작되었는지 확인하는 로직이 MetricsCollector에 있다고 가정
+            String transactionId = generateTransactionId(connectionId, threadName);
+            // 중복 방지를 위해 MetricsCollector에서 처리
+            logger.debug("[KubeDB] DML 실행으로 암시적 트랜잭션 가능: {} on connection {}", transactionId, connectionId);
+        }
+    }
+    
+    /**
+     * 쿼리 히스토리에 기록
+     */
+    private static void recordQueryInHistory(String connectionId, String sql, String queryType, long executionTimeMs) {
+        if (connectionId == null || sql == null) return;
+        
+        transactionQueryHistory.computeIfAbsent(connectionId, k -> new ArrayList<>())
+                .add(new QueryHistoryEntry(sql, queryType, executionTimeMs));
+        
+        // 히스토리가 너무 길면 오래된 것 제거 (최대 20개 유지)
+        List<QueryHistoryEntry> history = transactionQueryHistory.get(connectionId);
+        if (history.size() > 20) {
+            history.subList(0, history.size() - 20).clear();
+        }
+        
+        System.out.println("📝 쿼리 히스토리 기록: " + connectionId + " -> " + sql.substring(0, Math.min(50, sql.length())));
+    }
+    
+    /**
+     * 트랜잭션 쿼리 히스토리 조회
+     */
+    public static List<QueryHistoryEntry> getTransactionHistory(String connectionId) {
+        if (connectionId == null) return new ArrayList<>();
+        return new ArrayList<>(transactionQueryHistory.getOrDefault(connectionId, new ArrayList<>()));
+    }
+    
+    /**
+     * 현재 실행 중인 쿼리 정보 조회 (Long Running Transaction에서 사용)
+     */
+    public static ActiveQueryInfo getActiveQueryByThread(String threadName) {
+        // threadName으로 시작하는 키를 찾아서 반환
+        for (Map.Entry<String, ActiveQueryInfo> entry : activeQueries.entrySet()) {
+            if (entry.getKey().startsWith(threadName + "-")) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 현재 실행 중인 쿼리 정보 조회 (Connection ID 기반)
+     */
+    public static ActiveQueryInfo getActiveQueryByConnection(String connectionId) {
+        if (connectionId == null) return null;
+        
+        // 직접 Connection ID 기반 맵에서 조회 (빠름)
+        ActiveQueryInfo result = activeQueriesByConnection.get(connectionId);
+        if (result != null) {
+            return result;
+        }
+        
+        // 백업: 기존 방식으로 Thread 기반 맵에서 Connection ID로 검색
+        for (ActiveQueryInfo queryInfo : activeQueries.values()) {
+            if (connectionId.equals(queryInfo.connectionId)) {
+                return queryInfo;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 현재 실행 중인 쿼리 정보 조회 (Thread ID 기반 - HttpMetricsTransmitter에서 사용)
+     */
+    public static Object getActiveQueryInfo(String threadId) {
+        if (threadId == null) return null;
+        return activeQueries.get(threadId);
+    }
+    
+    /**
+     * 현재 활성화된 쿼리 중 아무거나 하나 반환 (Connection ID 매핑 문제 해결용)
+     */
+    public static Object getAnyActiveQueryInfo() {
+        // Connection ID 기반 맵에서 먼저 찾기
+        if (!activeQueriesByConnection.isEmpty()) {
+            return activeQueriesByConnection.values().iterator().next();
+        }
+        
+        // Thread ID 기반 맵에서 찾기
+        if (!activeQueries.isEmpty()) {
+            return activeQueries.values().iterator().next();
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 트랜잭션 종료시 히스토리 정리
+     */
+    private static void clearTransactionHistory(String connectionId) {
+        if (connectionId != null) {
+            transactionQueryHistory.remove(connectionId);
+            System.out.println("🗑️ 트랜잭션 히스토리 정리: " + connectionId);
+        }
+    }
+    
+    /**
+     * SQL 타입 추출
+     */
+    private static String extractSQLType(String sql) {
+        if (sql == null) return "UNKNOWN";
+        
+        String upperSQL = sql.trim().toUpperCase();
+        if (upperSQL.startsWith("SELECT")) return "SELECT";
+        if (upperSQL.startsWith("INSERT")) return "INSERT";
+        if (upperSQL.startsWith("UPDATE")) return "UPDATE";
+        if (upperSQL.startsWith("DELETE")) return "DELETE";
+        if (upperSQL.startsWith("CREATE")) return "CREATE";
+        if (upperSQL.startsWith("DROP")) return "DROP";
+        if (upperSQL.startsWith("ALTER")) return "ALTER";
+        return "OTHER";
+    }
+    
+    /**
+     * DML 문인지 확인
+     */
+    private static boolean isDMLStatement(String sql) {
+        return sql.startsWith("INSERT") || 
+               sql.startsWith("UPDATE") || 
+               sql.startsWith("DELETE") ||
+               sql.startsWith("MERGE") ||
+               sql.startsWith("UPSERT");
+    }
+    
+    /**
+     * 트랜잭션 ID 생성
+     */
+    private static String generateTransactionId(String connectionId, String threadName) {
+        return String.format("tx-%s-%s-%d", 
+                           connectionId != null ? connectionId.replaceAll("[^a-zA-Z0-9]", "") : "unknown",
+                           threadName != null ? threadName.replaceAll("[^a-zA-Z0-9]", "") : "unknown", 
+                           System.nanoTime());
+    }
+    
+    /**
+     * HikariCP 프록시에서 SQL 추출
+     */
+    private static String extractSqlFromHikariProxy(Object target) {
+        try {
+            // 1. toString() 메서드에서 SQL 정보 추출 시도
+            String toString = target.toString();
+            System.out.println("🔍 HikariCP toString: " + toString);
+            
+            // toString에서 실제 SQL 찾기
+            if (toString.contains("wrapping ")) {
+                int start = toString.indexOf("wrapping ") + 9;
+                int end = toString.length();
+                String potentialSQL = toString.substring(start, end).trim();
+                if (potentialSQL.toLowerCase().matches(".*\\b(select|insert|update|delete|create|drop|alter)\\b.*")) {
+                    System.out.println("✅ toString에서 SQL 발견: " + potentialSQL.substring(0, Math.min(60, potentialSQL.length())));
+                    return potentialSQL;
+                }
+            }
+            
+            if (toString.contains("sql=")) {
+                int start = toString.indexOf("sql=") + 4;
+                int end = toString.indexOf(",", start);
+                if (end == -1) end = toString.indexOf("}", start);
+                if (end == -1) end = toString.length();
+                
+                String sql = toString.substring(start, end).trim();
+                if (sql.startsWith("\"") && sql.endsWith("\"")) {
+                    sql = sql.substring(1, sql.length() - 1);
+                }
+                if (!sql.isEmpty() && !sql.equals("null")) {
+                    return sql;
+                }
+            }
+            
+            // 2. Reflection을 통한 SQL 추출 (안전하게)
+            try {
+                return extractSqlViaReflection(target);
+            } catch (Exception reflectionError) {
+                System.out.println("🔍 Reflection 실패, 대체 방법 시도: " + reflectionError.getMessage());
+            }
+            
+            // 3. 최후 수단: toString에서 SQL 패턴 매칭
+            if (toString.toLowerCase().matches(".*\\b(select|insert|update|delete|create|drop|alter)\\b.*")) {
+                return "SQL found in toString: " + toString.substring(0, Math.min(100, toString.length()));
+            }
+            
+            return null;
+            
+        } catch (Exception e) {
+            System.out.println("⚠️ HikariCP SQL 추출 실패: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Reflection을 통한 SQL 추출
+     */
+    private static String extractSqlViaReflection(Object target) {
+        try {
+            Class<?> targetClass = target.getClass();
+            
+            // HikariCP 프록시에서 실제 PreparedStatement 객체 얻기
+            java.lang.reflect.Field delegateField = findFieldByType(targetClass, java.sql.PreparedStatement.class);
+            if (delegateField != null) {
+                delegateField.setAccessible(true);
+                Object delegate = delegateField.get(target);
+                
+                if (delegate != null) {
+                    // PostgreSQL PreparedStatement에서 SQL 추출
+                    java.lang.reflect.Field sqlField = findFieldContaining(delegate.getClass(), "sql", "query", "preparedSql");
+                    if (sqlField != null) {
+                        sqlField.setAccessible(true);
+                        Object sqlValue = sqlField.get(delegate);
+                        if (sqlValue instanceof String) {
+                            return (String) sqlValue;
+                        }
+                    }
+                }
+            }
+            
+            // 직접 SQL 필드 찾기 시도
+            java.lang.reflect.Field sqlField = findFieldContaining(targetClass, "sql", "query", "preparedSql");
+            if (sqlField != null) {
+                sqlField.setAccessible(true);
+                Object sqlValue = sqlField.get(target);
+                if (sqlValue instanceof String) {
+                    return (String) sqlValue;
+                }
+            }
+            
+        } catch (Exception e) {
+            System.out.println("⚠️ Reflection SQL 추출 실패: " + e.getMessage());
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 특정 타입의 필드 찾기
+     */
+    private static java.lang.reflect.Field findFieldByType(Class<?> clazz, Class<?> fieldType) {
+        Class<?> currentClass = clazz;
+        while (currentClass != null && currentClass != Object.class) {
+            for (java.lang.reflect.Field field : currentClass.getDeclaredFields()) {
+                if (fieldType.isAssignableFrom(field.getType())) {
+                    return field;
+                }
+            }
+            currentClass = currentClass.getSuperclass();
+        }
+        return null;
+    }
+    
+    /**
+     * 특정 이름을 포함하는 필드 찾기
+     */
+    private static java.lang.reflect.Field findFieldContaining(Class<?> clazz, String... keywords) {
+        Class<?> currentClass = clazz;
+        while (currentClass != null && currentClass != Object.class) {
+            for (java.lang.reflect.Field field : currentClass.getDeclaredFields()) {
+                String fieldName = field.getName().toLowerCase();
+                for (String keyword : keywords) {
+                    if (fieldName.contains(keyword.toLowerCase())) {
+                        return field;
+                    }
+                }
+            }
+            currentClass = currentClass.getSuperclass();
+        }
+        return null;
+    }
+    
+    /**
+     * PostgreSQL 및 기타 DB의 시스템 메서드 필터링 (강화된 버전)
+     * 이런 메서드들은 Agent가 가로채면 안됨 (연결 설정, 메타데이터 조회 등)
+     * HikariCP 연결 풀 초기화 시 "No results were returned by the query" 오류 방지
+     */
+    private static boolean isSystemMethod(String methodName) {
+        // 🚨 1. PostgreSQL 핵심 시스템 메서드들 (HikariCP 호환성 필수)
+        if (methodName.equals("getTransactionIsolation") ||
+            methodName.equals("setTransactionIsolation") ||
+            methodName.equals("getAutoCommit") ||
+            methodName.equals("setAutoCommit") ||
+            methodName.equals("isReadOnly") ||
+            methodName.equals("setReadOnly") ||
+            methodName.equals("getCatalog") ||
+            methodName.equals("setCatalog") ||
+            methodName.equals("getSchema") ||
+            methodName.equals("setSchema") ||
+            methodName.equals("getMetaData") ||
+            methodName.equals("getDatabaseMetaData") ||
+            methodName.equals("getClientInfo") ||
+            methodName.equals("setClientInfo") ||
+            methodName.equals("isValid") ||
+            methodName.equals("getNetworkTimeout") ||
+            methodName.equals("setNetworkTimeout") ||
+            methodName.equals("getHoldability") ||
+            methodName.equals("setHoldability") ||
+            methodName.equals("getWarnings") ||
+            methodName.equals("clearWarnings") ||
+            methodName.equals("getTypeMap") ||
+            methodName.equals("setTypeMap")) {
+            return true;
+        }
+        
+        // 🚨 2. HikariCP 연결 검증 및 초기화 메서드들 (중요!)
+        if (methodName.equals("testConnection") ||
+            methodName.equals("validateConnection") ||
+            methodName.equals("ping") ||
+            methodName.equals("checkConnection") ||
+            methodName.equals("isConnectionAlive") ||
+            methodName.equals("validate") ||
+            methodName.equals("init") ||
+            methodName.equals("initialize") ||
+            methodName.equals("reset") ||
+            methodName.equals("resetConnection")) {
+            return true;
+        }
+        
+        // 🚨 3. PostgreSQL JDBC 드라이버 초기화 메서드들
+        if (methodName.equals("getURL") ||
+            methodName.equals("acceptsURL") ||
+            methodName.equals("getPropertyInfo") ||
+            methodName.equals("getDriverVersion") ||
+            methodName.equals("getDriverName") ||
+            methodName.equals("getMajorVersion") ||
+            methodName.equals("getMinorVersion") ||
+            methodName.equals("jdbcCompliant") ||
+            methodName.equals("getParentLogger")) {
+            return true;
+        }
+        
+        // 4. JDBC 표준 메타데이터 및 Object 메서드들
+        if (methodName.equals("isClosed") ||
+            methodName.equals("toString") ||
+            methodName.equals("hashCode") ||
+            methodName.equals("equals") ||
+            methodName.equals("getClass") ||
+            methodName.equals("notify") ||
+            methodName.equals("notifyAll") ||
+            methodName.equals("wait") ||
+            methodName.equals("finalize")) {
+            return true;
+        }
+        
+        // 🚨 5. Connection 상태 확인 메서드들 (HikariCP가 자주 사용)
+        if (methodName.equals("isClosed") ||
+            methodName.equals("isValid") ||
+            methodName.equals("isWrapperFor") ||
+            methodName.equals("unwrap") ||
+            methodName.equals("abort") ||
+            methodName.equals("getConnectionId") ||
+            methodName.equals("getConnectionInfo") ||
+            methodName.equals("getServerInfo")) {
+            return true;
+        }
+        
+        // 6. PreparedStatement/ResultSet 메타데이터 메서드들 (PostgreSQL 호환성 중요)
+        if (methodName.equals("getMetaData") ||
+            methodName.equals("getParameterMetaData") ||
+            methodName.equals("getResultSetMetaData") ||
+            methodName.equals("getResultSetType") ||
+            methodName.equals("getResultSetConcurrency") ||
+            methodName.equals("getResultSetHoldability") ||
+            methodName.equals("getFetchDirection") ||
+            methodName.equals("setFetchDirection") ||
+            methodName.equals("getFetchSize") ||
+            methodName.equals("setFetchSize") ||
+            methodName.equals("getMaxRows") ||
+            methodName.equals("setMaxRows") ||
+            methodName.equals("getMaxFieldSize") ||
+            methodName.equals("setMaxFieldSize") ||
+            methodName.equals("getQueryTimeout") ||
+            methodName.equals("setQueryTimeout")) {
+            return true;
+        }
+        
+        // 🚨 7. PostgreSQL 내부 시스템 쿼리 관련 (절대 인터셉트 금지)
+        if (methodName.startsWith("pg") || // PostgreSQL 전용 메서드들 (pgXXX)
+            methodName.startsWith("postgres") || // PostgreSQL 전용
+            methodName.contains("Version") || // 버전 관련
+            methodName.contains("Catalog") || // 카탈로그 관련
+            methodName.contains("Information") || // 정보 스키마 관련
+            methodName.contains("Metadata") || // 메타데이터 관련
+            methodName.contains("SystemTable")) { // 시스템 테이블 관련
+            return true;
+        }
+        
+        // 8. HikariCP 내부 메서드들 (더 정확한 필터링)
+        if (methodName.startsWith("get") && (
+               methodName.contains("Pool") ||
+               methodName.contains("Hikari") ||
+               methodName.contains("Config") ||
+               (methodName.contains("Connection") && !methodName.equals("getConnection")))) {
+            return true;
+        }
+        
+        // 🚨 9. 데이터 타입 및 변환 관련 메서드들 (PostgreSQL 특수 타입 처리)
+        if (methodName.contains("Binary") || // Binary 관련
+            methodName.contains("Array") ||  // Array 타입 관련
+            methodName.contains("Blob") ||   // Blob 관련
+            methodName.contains("Clob") ||   // Clob 관련
+            methodName.contains("JSON") ||   // JSON 타입 관련
+            methodName.contains("UUID") ||   // UUID 타입 관련
+            methodName.contains("Geometry") || // 공간 데이터 타입
+            methodName.contains("Timestamp")) { // 타임스탬프 관련
+            return true;
+        }
+        
+        // 6. Hibernate/JPA ORM 관련 시스템 메서드들
+        if (methodName.startsWith("hibernate") ||
+            methodName.startsWith("org_hibernate") ||
+            methodName.contains("LazyInit") ||
+            methodName.contains("Proxy") ||
+            methodName.contains("Session")) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 데이터베이스 초기화 준비 상태 확인
+     * HikariCP와 PostgreSQL 초기화가 완료될 때까지 대기
+     */
+    private static boolean isDatabaseInitializationReady() {
+        // 이미 초기화가 완료되었다면 true 반환
+        if (databaseInitializationComplete) {
+            return true;
+        }
+        
+        long currentTime = System.currentTimeMillis();
+        long elapsedTime = currentTime - agentStartTime;
+        
+        // 30초가 지났으면 초기화가 완료된 것으로 간주
+        if (elapsedTime >= INITIALIZATION_WAIT_TIME_MS) {
+            System.out.println("🚀 [KubeDB] 데이터베이스 초기화 대기 시간 완료 - Agent 인터셉션 활성화");
+            databaseInitializationComplete = true;
+            return true;
+        }
+        
+        // Spring Boot ApplicationContext 확인을 통한 초기화 완료 감지
+        try {
+            // Spring Boot가 완전히 시작되었는지 확인
+            if (isSpringBootFullyStarted()) {
+                System.out.println("🚀 [KubeDB] Spring Boot 초기화 완료 감지 - Agent 인터셉션 활성화 (경과시간: " + 
+                                 (elapsedTime / 1000) + "초)");
+                databaseInitializationComplete = true;
+                return true;
+            }
+        } catch (Exception e) {
+            // Spring Boot 확인 실패는 정상적일 수 있음
+        }
+        
+        // 아직 초기화가 완료되지 않음 - 인터셉션 대기
+        if (elapsedTime % 10000 == 0) { // 10초마다 한 번씩 로그 출력 (너무 자주 출력 방지)
+            System.out.println("⏳ [KubeDB] 데이터베이스 초기화 대기 중... (경과: " + 
+                             (elapsedTime / 1000) + "초/" + (INITIALIZATION_WAIT_TIME_MS / 1000) + "초)");
+        }
+        return false;
+    }
+    
+    /**
+     * Spring Boot 완전 시작 상태 확인
+     */
+    private static boolean isSpringBootFullyStarted() {
+        try {
+            // ApplicationContext 클래스가 로드되어 있는지 확인
+            Class<?> applicationContextHolderClass = Class.forName("org.springframework.context.ApplicationContextHolder");
+            Object applicationContext = applicationContextHolderClass.getMethod("getApplicationContext").invoke(null);
+            
+            if (applicationContext != null) {
+                // ApplicationContext가 존재하면 DataSource Bean 확인
+                try {
+                    Object dataSourceBean = applicationContext.getClass()
+                        .getMethod("getBean", Class.class)
+                        .invoke(applicationContext, javax.sql.DataSource.class);
+                    
+                    if (dataSourceBean != null) {
+                        // DataSource Bean이 존재하면 HikariCP 상태 확인
+                        return isHikariCPReady(dataSourceBean);
+                    }
+                } catch (Exception e) {
+                    // DataSource Bean이 없을 수 있음
+                }
+            }
+        } catch (Exception e) {
+            // Spring Boot이 아닐 수도 있음
+        }
+        
+        return false;
+    }
+    
+    /**
+     * HikariCP 준비 상태 확인
+     */
+    private static boolean isHikariCPReady(Object dataSource) {
+        try {
+            if (dataSource.getClass().getName().contains("HikariDataSource")) {
+                // HikariDataSource의 isRunning() 또는 isClosed() 메서드 확인
+                try {
+                    Boolean isClosed = (Boolean) dataSource.getClass().getMethod("isClosed").invoke(dataSource);
+                    return !isClosed;
+                } catch (Exception e) {
+                    // isClosed 메서드가 없을 수 있음 - 기본적으로 준비됨으로 간주
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            // HikariDataSource가 아닐 수 있음
+        }
+        
+        return true; // 다른 DataSource의 경우 준비됨으로 간주
     }
 }

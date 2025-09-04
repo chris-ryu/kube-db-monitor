@@ -84,18 +84,36 @@ public class HttpMetricsTransmitter {
     }
     
     /**
-     * 장기 실행 트랜잭션 알림 전송
+     * 장기 실행 트랜잭션 알림 전송 (기존 버전)
      */
     public void transmitLongRunningTransactionAlert(String transactionId, String connectionId, String threadName, long durationMs, long startTime) {
+        transmitLongRunningTransactionAlert(transactionId, connectionId, threadName, durationMs, startTime, null, null, null);
+    }
+    
+    /**
+     * 장기 실행 트랜잭션 알림 전송 (쿼리 정보 포함)
+     */
+    public void transmitLongRunningTransactionAlert(String transactionId, String connectionId, String threadName, 
+                                                  long durationMs, long startTime, String currentQuery, 
+                                                  String storedProcedureName, java.util.List<?> queryHistory) {
         if (!shouldTransmit()) {
             return;
         }
         
         executor.submit(() -> {
             try {
-                String json = createLongRunningTransactionAlertJson(transactionId, connectionId, threadName, durationMs, startTime);
+                String json = createLongRunningTransactionAlertJson(transactionId, connectionId, threadName, 
+                                                                   durationMs, startTime, currentQuery, storedProcedureName, queryHistory);
+                                                                   
+                // 디버깅: 실제 전송되는 JSON 및 쿼리 정보 로그 출력
+                logger.info("[KubeDB] 🔍 Long-running transaction alert JSON: currentQuery={}, storedProcedure={}, historySize={}", 
+                           currentQuery != null ? currentQuery.substring(0, Math.min(50, currentQuery.length())) : "null",
+                           storedProcedureName,
+                           queryHistory != null ? queryHistory.size() : "null");
+                logger.debug("[KubeDB] 🔍 Full long-running transaction JSON: {}", json);
+                           
                 sendHttpPost(json);
-                logger.info("[KubeDB] Long-running transaction alert transmitted: {} ms", durationMs);
+                logger.info("[KubeDB] Long-running transaction alert transmitted: {} ms (with query info)", durationMs);
             } catch (Exception e) {
                 logger.warn("[KubeDB] Failed to transmit long-running transaction alert: {}", e.getMessage());
             }
@@ -252,10 +270,138 @@ public class HttpMetricsTransmitter {
     }
     
     /**
-     * 장기 실행 트랜잭션 알림 JSON 생성
+     * 장기 실행 트랜잭션 알림 JSON 생성 (기존 버전)
      */
     private String createLongRunningTransactionAlertJson(String transactionId, String connectionId, String threadName, long durationMs, long startTime) {
+        return createLongRunningTransactionAlertJson(transactionId, connectionId, threadName, durationMs, startTime, null, null, null);
+    }
+    
+    /**
+     * 장기 실행 트랜잭션 알림 JSON 생성 (쿼리 정보 포함)
+     */
+    private String createLongRunningTransactionAlertJson(String transactionId, String connectionId, String threadName, 
+                                                       long durationMs, long startTime, String currentQuery, 
+                                                       String storedProcedureName, java.util.List<?> queryHistory) {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z";
+        
+        // 쿼리 정보 추가 필드 생성
+        String queryInfoFields = "";
+        if (currentQuery != null || storedProcedureName != null || (queryHistory != null && !queryHistory.isEmpty())) {
+            StringBuilder queryFields = new StringBuilder();
+            
+            if (currentQuery != null) {
+                String maskedCurrentQuery = config.isMaskSqlParams() ? maskSqlParameters(currentQuery) : currentQuery;
+                queryFields.append(",\"current_query\": \"")
+                           .append(maskedCurrentQuery.replace("\"", "\\\"").replace("\n", "\\n"))
+                           .append("\"");
+            }
+            
+            if (storedProcedureName != null) {
+                queryFields.append(",\"stored_procedure\": \"").append(storedProcedureName).append("\"");
+            }
+            
+            // 실행 중인 활성 쿼리 정보 조회 (Connection ID 기반으로 개선)
+            try {
+                // 방법 1: Connection ID로 ActiveQueryInfo 조회 (가장 정확)
+                Object activeQueryInfo = UniversalJDBCInterceptor.getActiveQueryByConnection(connectionId);
+                
+                // 방법 1-2: Connection ID가 "conn-" 형태인 경우 모든 활성 쿼리에서 매칭 시도
+                if (activeQueryInfo == null && connectionId.startsWith("conn-")) {
+                    // Thread ID 기반으로 생성된 Connection ID인 경우, 실제 Connection과 매핑
+                    activeQueryInfo = findActiveQueryByAnyConnection();
+                    if (activeQueryInfo != null) {
+                        logger.debug("[KubeDB] Thread 기반 Connection ID {}에서 활성 쿼리 대체 매칭 성공", connectionId);
+                    }
+                }
+                
+                if (activeQueryInfo != null) {
+                    // ActiveQueryInfo에서 SQL 정보 추출
+                    String activeSql = extractSqlFromActiveQueryInfo(activeQueryInfo);
+                    if (activeSql != null && !activeSql.isEmpty() && !activeSql.equals("SQL data collection in progress...")) {
+                        String maskedActiveSql = config.isMaskSqlParams() ? maskSqlParameters(activeSql) : activeSql;
+                        queryFields.append(",\"current_active_query\": \"")
+                                   .append(maskedActiveSql.replace("\"", "\\\"").replace("\n", "\\n"))
+                                   .append("\"");
+                        
+                        // SQL 타입도 추가
+                        String sqlType = extractSqlType(activeSql);
+                        queryFields.append(",\"active_query_type\": \"").append(sqlType).append("\"");
+                        
+                        logger.info("[KubeDB] 🔍 Connection ID로 활성 쿼리 발견: {} (Connection: {})", 
+                                   activeSql.substring(0, Math.min(100, activeSql.length())), connectionId);
+                    } else {
+                        logger.debug("[KubeDB] ⚠️ Connection ID로 SQL 추출 실패, Thread ID 방식 시도");
+                        // 방법 2: Thread Name으로 ActiveQueryInfo 조회 (백업)
+                        Object threadBasedQuery = UniversalJDBCInterceptor.getActiveQueryByThread(threadName);
+                        if (threadBasedQuery != null) {
+                            String threadSql = extractSqlFromActiveQueryInfo(threadBasedQuery);
+                            if (threadSql != null && !threadSql.isEmpty() && !threadSql.equals("SQL data collection in progress...")) {
+                                String maskedThreadSql = config.isMaskSqlParams() ? maskSqlParameters(threadSql) : threadSql;
+                                queryFields.append(",\"current_active_query\": \"")
+                                           .append(maskedThreadSql.replace("\"", "\\\"").replace("\n", "\\n"))
+                                           .append("\"");
+                                
+                                String sqlType = extractSqlType(threadSql);
+                                queryFields.append(",\"active_query_type\": \"").append(sqlType).append("\"");
+                                
+                                logger.info("[KubeDB] 🔍 Thread Name으로 활성 쿼리 발견: {} (Thread: {})", 
+                                           threadSql.substring(0, Math.min(100, threadSql.length())), threadName);
+                            }
+                        }
+                    }
+                } else {
+                    logger.debug("[KubeDB] ⚠️ Connection ID {}로 ActiveQuery 조회 결과 없음", connectionId);
+                    
+                    // 방법 2: Thread Name으로 ActiveQueryInfo 조회 (백업)
+                    Object threadBasedQuery = UniversalJDBCInterceptor.getActiveQueryByThread(threadName);
+                    if (threadBasedQuery != null) {
+                        String threadSql = extractSqlFromActiveQueryInfo(threadBasedQuery);
+                        if (threadSql != null && !threadSql.isEmpty() && !threadSql.equals("SQL data collection in progress...")) {
+                            String maskedThreadSql = config.isMaskSqlParams() ? maskSqlParameters(threadSql) : threadSql;
+                            queryFields.append(",\"current_active_query\": \"")
+                                       .append(maskedThreadSql.replace("\"", "\\\"").replace("\n", "\\n"))
+                                       .append("\"");
+                            
+                            String sqlType = extractSqlType(threadSql);
+                            queryFields.append(",\"active_query_type\": \"").append(sqlType).append("\"");
+                            
+                            logger.info("[KubeDB] 🔍 Thread Name으로 활성 쿼리 발견 (백업 방식): {} (Thread: {})", 
+                                       threadSql.substring(0, Math.min(100, threadSql.length())), threadName);
+                        }
+                    } else {
+                        logger.warn("[KubeDB] ❌ Connection ID와 Thread Name 모두로 ActiveQuery 조회 실패: conn={}, thread={}", 
+                                   connectionId, threadName);
+                    }
+                }
+                
+                // 백업으로 쿼리 히스토리도 시도
+                java.util.List<?> realHistory = UniversalJDBCInterceptor.getTransactionHistory(connectionId);
+                if (realHistory != null && !realHistory.isEmpty()) {
+                    queryFields.append(",\"query_history\": [");
+                    for (int i = 0; i < Math.min(realHistory.size(), 5); i++) { // 최대 5개로 줄임
+                        if (i > 0) queryFields.append(",");
+                        Object entry = realHistory.get(i);
+                        String historySql = extractSqlFromHistoryEntry(entry);
+                        String maskedHistorySql = config.isMaskSqlParams() ? maskSqlParameters(historySql) : historySql;
+                        queryFields.append("{\"query\": \"").append(maskedHistorySql.replace("\"", "\\\"")).append("\"}");
+                    }
+                    queryFields.append("]");
+                }
+            } catch (Exception e) {
+                logger.warn("[KubeDB] 활성 쿼리 정보 조회 실패: {}", e.getMessage());
+                // 실패시 기존 방식으로 fallback
+                if (queryHistory != null && !queryHistory.isEmpty()) {
+                    queryFields.append(",\"query_history\": [");
+                    for (int i = 0; i < Math.min(queryHistory.size(), 3); i++) {
+                        if (i > 0) queryFields.append(",");
+                        queryFields.append("{\"query\": \"history_query_").append(i).append("\"}");
+                    }
+                    queryFields.append("]");
+                }
+            }
+            
+            queryInfoFields = queryFields.toString();
+        }
         
         return String.format(
             "{" +
@@ -273,6 +419,7 @@ public class HttpMetricsTransmitter {
                 "\"thread_name\": \"%s\"," +
                 "\"start_time\": %d," +
                 "\"status\": \"active\"" +
+                "%s" + // 쿼리 정보 필드
             "}" +
             "}",
             timestamp,
@@ -284,7 +431,8 @@ public class HttpMetricsTransmitter {
             transactionId,
             durationMs,
             threadName,
-            startTime
+            startTime,
+            queryInfoFields
         );
     }
     
@@ -426,6 +574,50 @@ public class HttpMetricsTransmitter {
         if (executor != null) {
             executor.shutdown();
             logger.info("[KubeDB] HttpMetricsTransmitter shutdown completed");
+        }
+    }
+    
+    /**
+     * QueryHistoryEntry 객체에서 SQL 추출
+     */
+    private String extractSqlFromHistoryEntry(Object entry) {
+        try {
+            // Reflection으로 sql 필드 접근
+            java.lang.reflect.Field sqlField = entry.getClass().getDeclaredField("sql");
+            sqlField.setAccessible(true);
+            String sql = (String) sqlField.get(entry);
+            return sql != null ? sql : "Unknown SQL";
+        } catch (Exception e) {
+            return "SQL extraction failed: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * ActiveQueryInfo 객체에서 SQL 추출
+     */
+    private String extractSqlFromActiveQueryInfo(Object activeQueryInfo) {
+        try {
+            // Reflection으로 sql 필드 접근
+            java.lang.reflect.Field sqlField = activeQueryInfo.getClass().getDeclaredField("sql");
+            sqlField.setAccessible(true);
+            String sql = (String) sqlField.get(activeQueryInfo);
+            return sql != null ? sql : "No SQL data available";
+        } catch (Exception e) {
+            logger.debug("[KubeDB] ActiveQueryInfo SQL 추출 실패: {}", e.getMessage());
+            return "SQL extraction failed";
+        }
+    }
+    
+    /**
+     * 현재 활성화된 쿼리 중 아무거나 하나 반환 (Connection ID 매핑 문제 해결용)
+     */
+    private Object findActiveQueryByAnyConnection() {
+        try {
+            // UniversalJDBCInterceptor에서 활성 쿼리 목록 가져오기
+            return UniversalJDBCInterceptor.getAnyActiveQueryInfo();
+        } catch (Exception e) {
+            logger.debug("[KubeDB] 활성 쿼리 대체 매칭 실패: {}", e.getMessage());
+            return null;
         }
     }
 }

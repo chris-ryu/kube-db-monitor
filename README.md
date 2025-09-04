@@ -80,6 +80,32 @@ spec:
 | `kubedb.monitor/slow-query-threshold` | Slow query threshold (ms) | `1000` | `"2000"` |
 | `kubedb.monitor/sampling-rate` | Sampling rate (0.0-1.0) | `1.0` | `"0.5"` |
 
+### Environment Variables
+
+In addition to annotations, you can configure the agent using environment variables:
+
+| Environment Variable | Description | Default | Example |
+|---------------------|-------------|---------|---------|
+| `KUBEDB_MONITOR_ENABLED` | Enable/disable monitoring | `true` | `"false"` |
+| `KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS` | **Long running transaction threshold (ms)** | `4000` | `"5000"` |
+| `KUBEDB_MONITOR_SLOW_QUERY_THRESHOLD_MS` | Slow query threshold (ms) | `1000` | `"100"` |
+| `KUBEDB_MONITOR_SAMPLING_RATE` | Sampling rate (0.0-1.0) | `1.0` | `"0.8"` |
+| `KUBEDB_MONITOR_COLLECTOR_ENDPOINT` | Control plane endpoint URL | - | `"http://control-plane:8080/api/metrics"` |
+| `KUBEDB_MONITOR_LOG_LEVEL` | Log level | `"WARN"` | `"DEBUG"` |
+
+**Example with environment variables:**
+```yaml
+env:
+- name: KUBEDB_MONITOR_ENABLED
+  value: "true"
+- name: KUBEDB_MONITOR_LONG_RUNNING_TX_THRESHOLD_MS
+  value: "3000"  # 3 seconds threshold
+- name: KUBEDB_MONITOR_SLOW_QUERY_THRESHOLD_MS
+  value: "100"
+- name: KUBEDB_MONITOR_COLLECTOR_ENDPOINT
+  value: "http://kubedb-monitor-control-plane:8080/api/metrics"
+```
+
 ### Supported Database Types
 
 - `mysql` - MySQL/MariaDB

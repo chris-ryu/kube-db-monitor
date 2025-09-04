@@ -306,12 +306,12 @@ redeploy_agent_deployments() {
     wait_for_deployment_ready "university-registration-demo" "kubedb-monitor-test" 180
     log_success "university-registration-demo 재배포 완료"
     
-    # university-registration (UI 포함) 재배포
-    force_delete_deployment "university-registration" "kubedb-monitor-test"
-    log_info "university-registration 재배포 중..."
+    # university-registration-ui (UI 포함) 재배포
+    force_delete_deployment "university-registration-ui" "kubedb-monitor-test"
+    log_info "university-registration-ui 재배포 중..."
     kubectl apply -f k8s/university-registration-with-ui.yaml
-    wait_for_deployment_ready "university-registration" "kubedb-monitor-test" 180
-    log_success "university-registration 재배포 완료"
+    wait_for_deployment_ready "university-registration-ui" "kubedb-monitor-test" 180
+    log_success "university-registration-ui 재배포 완료"
 }
 
 # Control Plane 재배포
@@ -352,7 +352,8 @@ redeploy_university_app() {
     log_info "🎨 Frontend UI 서비스 재배포 중..."
     force_delete_deployment "university-registration-ui" "kubedb-monitor-test"
     log_info "university-registration-ui 새로운 배포 적용 중..."
-    # UI는 이미 university-registration-with-ui.yaml에 포함되어 있으므로 별도 apply 불필요
+    # UI deployment도 university-registration-with-ui.yaml에서 재생성 필요
+    kubectl apply -f k8s/university-registration-with-ui.yaml
     wait_for_deployment_ready "university-registration-ui" "kubedb-monitor-test" 120
     log_success "Frontend UI 서비스 재배포 완료"
     
@@ -414,7 +415,7 @@ check_component_status() {
     case $component in
         "agent")
             kubectl get deployment university-registration-demo -n kubedb-monitor-test -o wide 2>/dev/null || log_warning "Agent 관련 배포를 찾을 수 없음"
-            kubectl get deployment university-registration -n kubedb-monitor-test -o wide 2>/dev/null || true
+            kubectl get deployment university-registration-ui -n kubedb-monitor-test -o wide 2>/dev/null || true
             ;;
         "control-plane")
             kubectl get deployment kubedb-monitor-control-plane -n kubedb-monitor -o wide 2>/dev/null || log_warning "Control Plane 배포를 찾을 수 없음"

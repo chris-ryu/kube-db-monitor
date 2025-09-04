@@ -49,6 +49,18 @@ type QueryData struct {
 	TransactionId         *string  `json:"transaction_id,omitempty"`         // For transaction events
 	DeadlockDuration      *int64   `json:"deadlock_duration,omitempty"`      // For deadlock events
 	DeadlockConnections   *string  `json:"deadlock_connections,omitempty"`   // For deadlock events
+	
+	// Long running transaction query information
+	CurrentQuery      *string                  `json:"current_query,omitempty"`       // Currently executing query
+	StoredProcedure   *string                  `json:"stored_procedure,omitempty"`    // Stored procedure name
+	QueryHistory      []QueryHistoryInfo       `json:"query_history,omitempty"`       // Query execution history
+}
+
+type QueryHistoryInfo struct {
+	Query         string `json:"query"`
+	StartTime     int64  `json:"start_time"`
+	ExecutionTime int64  `json:"execution_time"`
+	QueryType     string `json:"query_type"`
 }
 
 type ExecutionContext struct {

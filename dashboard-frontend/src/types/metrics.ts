@@ -3,6 +3,8 @@
  * Java Agent에서 전송되는 JSON 구조와 일치
  */
 
+import { QueryHistoryInfo } from './transaction'
+
 export interface QueryMetrics {
   timestamp: string
   pod_name?: string
@@ -40,6 +42,11 @@ export interface QueryData {
   tps_value?: number
   transaction_duration?: number
   transaction_id?: string
+  
+  // Long Running Transaction SQL query information
+  current_query?: string
+  stored_procedure?: string
+  query_history?: QueryHistoryInfo[]
 }
 
 export interface ExecutionContext {

@@ -21,6 +21,11 @@ export interface TransactionEvent {
   // 쿼리 목록
   queries: TransactionQuery[]
   
+  // Long running transaction 쿼리 정보 (새로 추가)
+  current_query?: string           // 현재 실행 중인 쿼리
+  stored_procedure?: string        // Stored Procedure 이름
+  query_history?: QueryHistoryInfo[] // 쿼리 실행 히스토리
+  
   // 성능 메트릭
   cpu_time_ms?: number
   memory_used_bytes?: number
@@ -38,6 +43,13 @@ export interface TransactionQuery {
   rows_affected?: number
   status: 'success' | 'error'
   error_message?: string
+}
+
+export interface QueryHistoryInfo {
+  query: string
+  start_time: number
+  execution_time: number
+  query_type: string
 }
 
 export interface TransactionTimeline {

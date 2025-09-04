@@ -84,7 +84,7 @@ spec:
         - name: NEXT_PUBLIC_WS_URL
           value: "wss://kube-db-mon-controlplane.bitgaram.info/ws"
         - name: NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS
-          value: "4000"
+          value: "5000"
         - name: NEXT_PUBLIC_DASHBOARD_TITLE
           valueFrom:
             configMapKeyRef:
@@ -175,7 +175,7 @@ data:
   # Dashboard Configuration
   dashboard.env: |
     NODE_ENV=production
-    NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS=4000
+    NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS=5000
     NEXT_PUBLIC_DASHBOARD_TITLE=🚀 Advanced KubeDB Monitor Dashboard
     CONTROL_PLANE_URL=ws://kubedb-monitor-control-plane:8080
     WEBSOCKET_URL=wss://kube-db-mon-controlplane.bitgaram.info/ws

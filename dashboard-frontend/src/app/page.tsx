@@ -158,33 +158,8 @@ export default function Dashboard() {
       console.log('🔍 Full deadlock message structure:', JSON.stringify(message, null, 2))
       processDeadlockEvent(message.data)
     } else if (message.type === 'long_running_transaction') {
-      console.log('🐌 Processing long running transaction event:', message.data)
-      console.log('🔍 DEBUG: Full long running transaction WebSocket message:', JSON.stringify(message, null, 2))
-      console.log('🔍 DEBUG: Message data structure:', message.data)
-      console.log('🔍 DEBUG: Execution time from message:', message.data?.data?.execution_time_ms)
-      // Create TransactionEvent directly for Long Running Transaction
-      const longRunningTx: TransactionEvent = {
-        id: `tx-long-${Date.now()}`,
-        transaction_id: message.data?.data?.query_id || `long-tx-${Date.now()}`,
-        start_time: new Date(Date.now() - (message.data?.data?.execution_time_ms || 5000)).toISOString(),
-        status: 'active',
-        duration_ms: message.data?.data?.execution_time_ms || 5000,
-        query_count: 1,
-        total_execution_time_ms: message.data?.data?.execution_time_ms || 5000,
-        pod_name: message.data?.pod_name || 'unknown-pod',
-        namespace: message.data?.namespace || 'production',
-        queries: [{
-          query_id: message.data?.data?.query_id || `lrt-query-${Date.now()}`,
-          sequence_number: 1,
-          sql_pattern: 'LONG_RUNNING_TRANSACTION',
-          sql_type: 'OTHER',
-          execution_time_ms: message.data?.data?.execution_time_ms || 5000,
-          timestamp: new Date().toISOString(),
-          status: 'success'
-        }]
-      }
-      console.log('🐌 Adding Long Running Transaction to transactions array:', longRunningTx)
-      processTransactionEvent(longRunningTx)
+      // Long Running Transaction은 event_type을 통해서만 처리 (중복 제거)
+      console.log('🐌 Long running transaction message received - processing via event_type only')
       processMetric(message.data)
     } else {
       console.warn('❓ Unknown message type:', message.type, message)
@@ -224,18 +199,44 @@ export default function Dashboard() {
     // Handle Long Running Transaction events
     if (newMetric.event_type === 'long_running_transaction') {
       console.log('🐌 Processing Long Running Transaction event:', newMetric)
+      console.log('🔍 SQL Info - CurrentQuery:', newMetric.data?.current_query)
+      console.log('🔍 SQL Info - StoredProcedure:', newMetric.data?.stored_procedure)
+      console.log('🔍 SQL Info - QueryHistory:', newMetric.data?.query_history)
+      
       const transactionEvent: TransactionEvent = {
         id: `tx-long-${Date.now()}`,
         transaction_id: newMetric.data?.transaction_id || `tx-${Date.now()}`,
         start_time: new Date(Date.now() - (newMetric.data?.transaction_duration || 7000)).toISOString(),
         status: 'active',
         duration_ms: newMetric.data?.transaction_duration || 7000,
-        query_count: 1,
+        query_count: (newMetric.data?.query_history?.length || 0) + 1,
         total_execution_time_ms: Math.floor((newMetric.data?.transaction_duration || 7000) * 0.7),
         pod_name: newMetric.pod_name || 'unknown-pod',
-        namespace: 'production',
-        queries: []
+        namespace: newMetric.namespace || 'production',
+        
+        // 🎯 SQL 쿼리 정보 매핑 추가
+        current_query: newMetric.data?.current_query || undefined,
+        stored_procedure: newMetric.data?.stored_procedure || undefined,
+        query_history: newMetric.data?.query_history || [],
+        
+        queries: newMetric.data?.query_history ? newMetric.data.query_history.map((qh: any, index: number) => ({
+          query_id: `hist-${index}`,
+          sql_pattern: qh.query || 'Unknown Query',
+          sql_type: qh.query_type || 'OTHER' as any,
+          execution_time_ms: qh.execution_time || 0,
+          timestamp: new Date(qh.start_time || Date.now()).toISOString(),
+          sequence_number: index,
+          status: 'success' as any
+        })) : []
       }
+      
+      console.log('✅ Created TransactionEvent with SQL info:', {
+        current_query: transactionEvent.current_query ? 'Present' : 'Missing',
+        stored_procedure: transactionEvent.stored_procedure ? 'Present' : 'Missing', 
+        query_history_count: transactionEvent.query_history?.length || 0,
+        queries_count: transactionEvent.queries.length
+      })
+      
       processTransactionEvent(transactionEvent)
     }
     
