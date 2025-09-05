@@ -218,7 +218,16 @@
       "Bash(/tmp/long-running-transaction-test-suite.sh)",
       "Bash(/tmp/connection-id-based-sql-test.sh:*)",
       "Bash(/tmp/final-connection-id-test.sh:*)",
-      "Bash(/tmp/ultimate-sql-extraction-test.sh:*)"
+      "Bash(/tmp/ultimate-sql-extraction-test.sh:*)",
+      "Bash(./scripts/deadlock-longrunning-integration-test.sh:*)",
+      "Bash(/tmp/long-running-transaction-validation-test.sh:*)",
+      "Bash(/tmp/sql-execution-debug-test.sh:*)",
+      "Bash(/tmp/final-long-running-transaction-test.sh:*)",
+      "Bash(/tmp/bytebuddy-interception-debug.sh:*)",
+      "Bash(/tmp/ui-long-running-pipeline-test.sh:*)",
+      "Bash(./scripts/event-pipeline-verification-test.sh:*)",
+      "Read(//Users/narzis/**)",
+      "Bash(./scripts/agent-comprehensive-test-suite.sh:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

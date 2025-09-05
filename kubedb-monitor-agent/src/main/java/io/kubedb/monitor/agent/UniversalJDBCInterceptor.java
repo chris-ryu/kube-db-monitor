@@ -125,10 +125,7 @@ public class UniversalJDBCInterceptor {
         String methodName = method.getName();
         String className = target.getClass().getSimpleName();
         
-        // 🚨 Long Running Transaction SQL 추출 기능 일시 비활성화 - PostgreSQL 호환성 우선
-        // 이 기능은 나중에 별도의 방식으로 다시 구현 예정
-        /*
-        // 🚀 SQL 실행 시작시 ActiveQueryInfo 저장 (Long Running Transaction에서 사용)
+        // 🚀 Long Running Transaction SQL 추적 로직 복원 (PostgreSQL 호환성 유지)
         String connectionId = null;
         String threadId = null;
         if (methodName.contains("execute") && !methodName.contains("Batch")) {
@@ -137,18 +134,19 @@ public class UniversalJDBCInterceptor {
                 threadId = Thread.currentThread().getName() + "-" + Thread.currentThread().getId();
                 String sql = extractSQL(target, args);
                 
-                if (sql != null && !sql.contains("[SQL extraction failed]") && !sql.trim().isEmpty()) {
+                // PostgreSQL 호환성을 위한 안전한 SQL 추출
+                if (sql != null && !sql.contains("[SQL extraction failed]") && !sql.trim().isEmpty() 
+                    && !isSystemQuerySQL(sql)) {
                     ActiveQueryInfo queryInfo = new ActiveQueryInfo(sql, connectionId, extractSQLType(sql));
                     activeQueries.put(threadId, queryInfo);
                     activeQueriesByConnection.put(connectionId, queryInfo);
-                    System.out.println("🚀 SQL 실행 시작 저장 (Thread + Connection): " + threadId + " & " + connectionId + " -> " + sql.substring(0, Math.min(50, sql.length())));
+                    logger.debug("[KubeDB] SQL 실행 시작 저장: {} on {}", threadId, connectionId);
                 }
             } catch (Exception e) {
                 // SQL 실행 시작 시점 저장 실패해도 메인 로직에 영향 없음
-                System.out.println("⚠️ SQL 실행 시작 시점 정보 저장 실패: " + e.getMessage());
+                logger.warn("[KubeDB] SQL 실행 시작 시점 정보 저장 실패: {}", e.getMessage());
             }
         }
-        */
         
         try {
             // SQL 실행 관련 메서드만 로깅
@@ -1144,16 +1142,23 @@ public class UniversalJDBCInterceptor {
             trimmedSql.contains("BEGIN TRANSACTION")) {
             
             String transactionId = generateTransactionId(connectionId, threadName);
-            metricsCollector.recordTransactionBegin(connectionId, transactionId);
+            boolean transactionStarted = metricsCollector.recordTransactionBegin(connectionId, transactionId);
             
-            logger.info("[KubeDB] 명시적 트랜잭션 시작 감지: {} on connection {}", transactionId, connectionId);
+            if (transactionStarted) {
+                logger.info("[KubeDB] 명시적 트랜잭션 시작 감지: {} on connection {}", transactionId, connectionId);
+            }
         } 
-        // 첫 번째 DML 실행 시 암시적 트랜잭션 시작 (autoCommit=false인 경우)
-        else if (isDMLStatement(trimmedSql)) {
-            // 이미 트랜잭션이 시작되었는지 확인하는 로직이 MetricsCollector에 있다고 가정
+        // 🎯 Spring @Transactional 환경에서 암시적 트랜잭션 감지 강화
+        // 첫 번째 SQL 실행 시 항상 트랜잭션 시작으로 간주 (Spring Boot 환경 특성)
+        else {
+            // Connection별 트랜잭션 상태 확인 및 시작
             String transactionId = generateTransactionId(connectionId, threadName);
-            // 중복 방지를 위해 MetricsCollector에서 처리
-            logger.debug("[KubeDB] DML 실행으로 암시적 트랜잭션 가능: {} on connection {}", transactionId, connectionId);
+            boolean transactionStarted = metricsCollector.recordTransactionBegin(connectionId, transactionId);
+            
+            if (transactionStarted) {
+                logger.debug("[KubeDB] 🎯 Spring @Transactional 암시적 트랜잭션 시작: {} on connection {} (SQL: {})", 
+                           transactionId, connectionId, truncateSQL(sql));
+            }
         }
     }
     
@@ -1278,6 +1283,15 @@ public class UniversalJDBCInterceptor {
                sql.startsWith("DELETE") ||
                sql.startsWith("MERGE") ||
                sql.startsWith("UPSERT");
+    }
+    
+    /**
+     * SQL 문자열을 로깅용으로 축약
+     */
+    private static String truncateSQL(String sql) {
+        if (sql == null) return "null";
+        if (sql.length() <= 50) return sql;
+        return sql.substring(0, 47) + "...";
     }
     
     /**
@@ -1423,6 +1437,28 @@ public class UniversalJDBCInterceptor {
         return null;
     }
     
+    /**
+     * PostgreSQL 시스템 쿼리 필터링 (Long-running transaction 추적용)
+     */
+    private static boolean isSystemQuerySQL(String sql) {
+        if (sql == null) return false;
+        
+        String upperSQL = sql.trim().toUpperCase();
+        
+        // PostgreSQL 시스템 쿼리 패턴들 (Long-running transaction 추적에서 제외)
+        return upperSQL.startsWith("SELECT VERSION()") ||
+               upperSQL.contains("INFORMATION_SCHEMA") ||
+               upperSQL.contains("PG_CATALOG") ||
+               upperSQL.contains("SYSTEM_CATALOG") ||
+               upperSQL.startsWith("SHOW ") ||
+               upperSQL.startsWith("DESCRIBE ") ||
+               upperSQL.startsWith("EXPLAIN ") ||
+               upperSQL.contains("METADATA") ||
+               (upperSQL.contains("SELECT") && upperSQL.contains("DUAL")) ||
+               upperSQL.equals("SELECT 1") ||
+               upperSQL.equals("SELECT NOW()");
+    }
+
     /**
      * PostgreSQL 및 기타 DB의 시스템 메서드 필터링 (강화된 버전)
      * 이런 메서드들은 Agent가 가로채면 안됨 (연결 설정, 메타데이터 조회 등)

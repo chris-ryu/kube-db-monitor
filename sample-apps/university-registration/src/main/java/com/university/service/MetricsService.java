@@ -73,6 +73,11 @@ public class MetricsService {
         } else if ("transaction_committed".equals(eventType) || "transaction_rolled_back".equals(eventType)) {
             txInfo.status = "transaction_committed".equals(eventType) ? "committed" : "rolled_back";
             txInfo.endTime = Instant.now();
+        } else if ("long_running_test".equals(eventType)) {
+            // Long-running test에서는 details에서 직접 값들을 가져옴
+            txInfo.queryCount = ((Number) details.getOrDefault("query_count", 0)).intValue();
+            txInfo.totalExecutionTimeMs = ((Number) details.getOrDefault("execution_time_ms", 0L)).longValue();
+            // endTime은 설정하지 않아서 현재 시간 기준으로 duration 계산
         }
         
         long durationMs = txInfo.endTime != null ? 

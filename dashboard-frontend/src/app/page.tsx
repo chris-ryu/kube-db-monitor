@@ -5,11 +5,8 @@ import { QueryMetrics, AggregatedMetrics } from '@/types/metrics'
 import { TransactionEvent } from '@/types/transaction'
 import { DeadlockEvent } from '@/types/deadlock'
 import { DeadlockAlert } from '@/components/DeadlockAlert'
-import { TransactionTimeline } from '@/components/TransactionTimeline'
 import { LongRunningTransactionAlert } from '@/components/LongRunningTransactionAlert'
-import { NodePodMetrics } from '@/components/NodePodMetrics'
 import { ConnectionPoolDetail } from '@/components/ConnectionPoolDetail'
-import { ConnectionPoolChart } from '@/components/ConnectionPoolChart'
 
 
 export default function Dashboard() {
@@ -551,21 +548,10 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Advanced Connection Pool Monitoring */}
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4 text-green-400">
-            🏊 Advanced Connection Pool Monitoring
-          </h2>
-          
-          {/* Connection Pool Real-time Chart */}
-          <div className="mb-6">
-            <ConnectionPoolChart aggregatedMetrics={aggregatedMetrics} />
-          </div>
 
-          {/* Connection Pool Details */}
-          <div className="mb-6">
-            <ConnectionPoolDetail aggregatedMetrics={aggregatedMetrics} />
-          </div>
+        {/* Connection Pool Details */}
+        <div className="mb-8">
+          <ConnectionPoolDetail aggregatedMetrics={aggregatedMetrics} />
         </div>
 
         {/* Alert Panels */}
@@ -581,15 +567,7 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Node/Pod Metrics Panel */}
-        <div className="mb-8">
-          <NodePodMetrics metrics={metrics} />
-        </div>
 
-        {/* Transaction Timeline */}
-        <div className="mb-8">
-          <TransactionTimeline transactions={transactions} />
-        </div>
 
         {/* Recent Queries Table */}
         <div>

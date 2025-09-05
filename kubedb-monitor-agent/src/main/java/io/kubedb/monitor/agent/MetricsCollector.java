@@ -112,11 +112,20 @@ public class MetricsCollector {
     }
     
     /**
-     * 트랜잭션 시작 기록
+     * 트랜잭션 시작 기록 (중복 방지 포함)
+     * @return true if new transaction was started, false if already exists
      */
-    public void recordTransactionBegin(String connectionId, String transactionId) {
+    public boolean recordTransactionBegin(String connectionId, String transactionId) {
         if (!config.isEnabled()) {
-            return;
+            return false;
+        }
+        
+        // 이미 해당 connectionId로 활성 트랜잭션이 있는지 확인
+        boolean existingTransaction = activeTransactions.values().stream()
+            .anyMatch(tx -> connectionId.equals(tx.connectionId));
+            
+        if (existingTransaction) {
+            return false; // 이미 트랜잭션이 활성화되어 있음
         }
         
         TransactionInfo txInfo = new TransactionInfo();
@@ -127,6 +136,8 @@ public class MetricsCollector {
         
         activeTransactions.put(transactionId, txInfo);
         logger.fine(String.format("[KubeDB] Transaction started: %s on %s", transactionId, connectionId));
+        
+        return true; // 새 트랜잭션이 시작됨
     }
     
     /**
@@ -207,6 +218,7 @@ public class MetricsCollector {
         
         logger.fine(String.format("[KubeDB] Transaction rolled back (%dms)", executionTimeMs));
     }
+    
     
     /**
      * 세이브포인트 롤백 기록
