@@ -141,15 +141,26 @@ public class MetricsCollector {
     }
     
     /**
-     * 트랜잭션 상태 변경 기록
+     * 활성 트랜잭션이 있는지 확인
      */
-    public void recordTransactionStateChange(boolean autoCommit, long executionTimeNanos) {
+    public boolean hasActiveTransaction(String connectionId) {
+        if (!config.isEnabled()) {
+            return false;
+        }
+        
+        return activeTransactions.values().stream()
+            .anyMatch(tx -> connectionId.equals(tx.connectionId));
+    }
+    
+    /**
+     * 트랜잭션 상태 변경 기록 (연결 ID와 함께)
+     */
+    public void recordTransactionStateChange(boolean autoCommit, long executionTimeNanos, String connectionId) {
         if (!config.isEnabled()) {
             return;
         }
         
-        String connectionId = "conn-" + Thread.currentThread().getId();
-        String transactionId = "tx-" + System.nanoTime();
+        String transactionId = "tx-" + connectionId + "-" + System.nanoTime();
         
         if (!autoCommit) {
             // 트랜잭션 시작
@@ -161,8 +172,16 @@ public class MetricsCollector {
         }
         
         long executionTimeMs = executionTimeNanos / 1_000_000;
-        logger.fine(String.format("[KubeDB] Transaction state change: autoCommit=%s (%dms)", 
-                   autoCommit, executionTimeMs));
+        logger.fine(String.format("[KubeDB] Transaction state change: autoCommit=%s, connectionId=%s (%dms)", 
+                   autoCommit, connectionId, executionTimeMs));
+    }
+    
+    /**
+     * 트랜잭션 상태 변경 기록 (하위 호환성을 위한 오버로드)
+     */
+    public void recordTransactionStateChange(boolean autoCommit, long executionTimeNanos) {
+        String connectionId = "conn-" + Thread.currentThread().getId();
+        recordTransactionStateChange(autoCommit, executionTimeNanos, connectionId);
     }
     
     /**

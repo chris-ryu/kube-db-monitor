@@ -1,5 +1,8 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { DeadlockEvent } from '@/types/deadlock'
+import { AlertTriangle, Eye, Clock, Database } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface DeadlockAlertProps {
   deadlocks: DeadlockEvent[]
@@ -8,153 +11,129 @@ interface DeadlockAlertProps {
 }
 
 export function DeadlockAlert({ deadlocks, onResolve, className = '' }: DeadlockAlertProps) {
+  const [selectedDeadlock, setSelectedDeadlock] = useState<DeadlockEvent | null>(null)
   const activeDeadlocks = deadlocks.filter(d => d.status === 'active')
 
-  if (activeDeadlocks.length === 0) {
-    return (
-      <div className={`bg-green-900/20 border border-green-800 rounded-lg p-4 ${className}`}>
-        <div className="flex items-center space-x-3">
-          <span className="text-2xl">✅</span>
-          <div>
-            <h3 className="text-green-400 font-semibold">No Active Deadlocks</h3>
-            <p className="text-green-300/70 text-sm">System is running smoothly</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className={`space-y-4 ${className}`}>
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-red-400 flex items-center space-x-2">
-          <span>🚨</span>
-          <span>Deadlock Alert</span>
-        </h2>
-        {activeDeadlocks.length > 1 && (
-          <span className="bg-red-900/50 text-red-300 px-3 py-1 rounded-full text-sm">
-            {activeDeadlocks.length} Active Deadlocks
-          </span>
-        )}
-      </div>
-
-      <div className="space-y-3">
-        {activeDeadlocks.map((deadlock) => (
-          <DeadlockCard 
-            key={deadlock.id} 
-            deadlock={deadlock} 
-            onResolve={onResolve}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function DeadlockCard({ deadlock, onResolve }: { 
-  deadlock: DeadlockEvent
-  onResolve?: (id: string) => void 
-}) {
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'border-red-500 bg-red-900/20'
-      case 'warning': return 'border-yellow-500 bg-yellow-900/20'
-      default: return 'border-blue-500 bg-blue-900/20'
-    }
-  }
-
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffSec = Math.floor(diffMs / 1000)
-    
-    if (diffSec < 60) return `${diffSec}s ago`
-    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
-    return `${Math.floor(diffSec / 3600)}h ago`
-  }
-
-  return (
-    <div className={`border rounded-lg p-4 ${getSeverityColor(deadlock.severity)}`}>
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="bg-red-600 text-white px-2 py-1 rounded text-xs font-bold uppercase">
-              {deadlock.severity}
-            </span>
-            {deadlock.pod_name && (
-              <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">
-                Pod: {deadlock.pod_name}
-              </span>
-            )}
-          </div>
-          <p className="text-gray-300 mt-1">
-            <strong>{deadlock.participants.length} transactions involved:</strong>{' '}
-            {deadlock.participants.map((participant, index) => (
-              <span key={index}>
-                {typeof participant === 'string' 
-                  ? participant 
-                  : (participant as any).id || (participant as any).connection || JSON.stringify(participant)
-                }
-                {index < deadlock.participants.length - 1 && ', '}
-              </span>
-            ))}
-          </p>
-        </div>
-        
-        {onResolve && (
-          <button
-            onClick={() => onResolve(deadlock.id)}
-            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition-colors"
-          >
-            Resolve
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-        <div>
-          <p className="text-sm text-gray-400">
-            <strong>Detected:</strong> {formatTime(deadlock.detectionTime)}
-          </p>
-          <p className="text-sm text-gray-400">
-            <strong>Recommended victim:</strong>{' '}
-            <span className="text-red-300 font-mono">{deadlock.recommendedVictim}</span>
-          </p>
-        </div>
-        
-        {deadlock.cycleLength && (
-          <div>
-            <p className="text-sm text-gray-400">
-              <strong>Cycle Length:</strong> {deadlock.cycleLength} transactions
-            </p>
-          </div>
-        )}
-      </div>
-
-      {deadlock.lockChain.length > 0 && (
-        <div>
-          <p className="text-sm font-medium text-gray-300 mb-2">Lock Chain:</p>
-          <div className="bg-gray-800/50 rounded p-3">
-            <div className="font-mono text-xs space-y-1">
-              {deadlock.lockChain.map((chain, index) => (
-                <div key={index} className="flex items-center space-x-2">
-                  <span className="text-gray-500">{index + 1}.</span>
-                  <span className="text-yellow-300">
-                    {typeof chain === 'string' 
-                      ? chain 
-                      : `${(chain as any).from || 'unknown'} → ${(chain as any).to || 'unknown'} (${(chain as any).resource || 'unknown resource'}, ${(chain as any).lockType || 'unknown lock'})`
-                    }
-                  </span>
-                  {index < deadlock.lockChain.length - 1 && (
-                    <span className="text-red-400">↓</span>
-                  )}
-                </div>
-              ))}
+    <>
+      <div className="glass-morphism rounded-2xl p-6 bg-gradient-to-br from-red-500/10 to-pink-500/10 border border-red-500/20 transform hover:scale-105 transition-transform duration-300">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-gradient-to-r from-red-500/20 to-pink-500/20">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Deadlocks</h3>
+              <p className="text-white/60 text-sm">Failed transactions</p>
             </div>
           </div>
+          <div className="text-2xl font-bold text-red-400">
+            {activeDeadlocks.length}
+          </div>
         </div>
-      )}
-    </div>
+
+        <div className="space-y-3 max-h-64 overflow-y-auto">
+          {activeDeadlocks.map((deadlock) => (
+            <div
+              key={deadlock.id}
+              className="glass-morphism rounded-lg p-3 border border-white/10 hover:border-red-500/30 transition-all duration-200 group"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Database className="w-3 h-3 text-white/60 flex-shrink-0" />
+                    <p className="text-white/80 text-xs font-medium truncate">
+                      {deadlock.pod_name || 'Database'}
+                    </p>
+                    <span className="text-red-400 text-xs">#{deadlock.id}</span>
+                  </div>
+                  <p className="text-white/60 text-xs truncate">
+                    Deadlock detected
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Clock className="w-3 h-3 text-white/40" />
+                    <span className="text-white/40 text-xs">
+                      {new Date(deadlock.detectionTime).toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
+                  onClick={() => setSelectedDeadlock(deadlock)}
+                >
+                  <Eye className="w-3 h-3 text-white/60" />
+                </Button>
+              </div>
+            </div>
+          ))}
+          
+          {activeDeadlocks.length === 0 && (
+            <div className="text-center py-8">
+              <AlertTriangle className="w-8 h-8 text-white/20 mx-auto mb-2" />
+              <p className="text-white/40 text-sm">No deadlocks detected</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Dialog open={!!selectedDeadlock} onOpenChange={() => setSelectedDeadlock(null)}>
+        <DialogContent className="glass-morphism border border-white/20 bg-gradient-to-br from-slate-900/90 to-slate-800/90">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              Deadlock Details
+            </DialogTitle>
+          </DialogHeader>
+          {selectedDeadlock && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-white/60 text-sm">Transaction ID</p>
+                  <p className="text-white font-medium">{selectedDeadlock.id}</p>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">Database</p>
+                  <p className="text-white font-medium">{selectedDeadlock.pod_name || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">Duration</p>
+                  <p className="text-white font-medium">{selectedDeadlock.duration_ms}ms</p>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">Session</p>
+                  <p className="text-white font-medium">{selectedDeadlock.pod_name || 'N/A'}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-white/60 text-sm mb-2">Connections</p>
+                <div className="glass-morphism rounded-lg p-3 bg-black/20 border border-white/10">
+                  <code className="text-white/80 text-sm">{selectedDeadlock.connections}</code>
+                </div>
+              </div>
+              {selectedDeadlock.participants.length > 0 && (
+                <div>
+                  <p className="text-white/60 text-sm mb-2">Participants</p>
+                  <div className="glass-morphism rounded-lg p-3 bg-black/20 border border-white/10">
+                    <div className="space-y-1">
+                      {selectedDeadlock.participants.map((participant, index) => (
+                        <p key={index} className="text-white/80 text-sm font-mono">
+                          {typeof participant === 'string' 
+                            ? participant 
+                            : JSON.stringify(participant)
+                          }
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
+

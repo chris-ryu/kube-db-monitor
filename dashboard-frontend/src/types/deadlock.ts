@@ -12,6 +12,10 @@ export interface DeadlockEvent {
   pod_name?: string
   namespace?: string
   
+  // Control Plane에서 실제로 보내는 필드들 (primary)
+  duration_ms: number             // Control Plane: duration_ms
+  connections: string             // Control Plane: connections
+  
   // 추가 메타데이터
   cycleLength?: number
   victimCost?: number

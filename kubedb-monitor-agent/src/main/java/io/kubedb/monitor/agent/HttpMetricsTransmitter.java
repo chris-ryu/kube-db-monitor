@@ -418,7 +418,8 @@ public class HttpMetricsTransmitter {
                 "\"transaction_duration\": %d," +
                 "\"thread_name\": \"%s\"," +
                 "\"start_time\": %d," +
-                "\"status\": \"active\"" +
+                "\"status\": \"active\"," +
+                "\"sql_pattern\": \"%s\"" +
                 "%s" + // 쿼리 정보 필드
             "}" +
             "}",
@@ -432,6 +433,7 @@ public class HttpMetricsTransmitter {
             durationMs,
             threadName,
             startTime,
+            currentQuery != null ? currentQuery.replace("\"", "\\\"") : "Long running transaction",
             queryInfoFields
         );
     }

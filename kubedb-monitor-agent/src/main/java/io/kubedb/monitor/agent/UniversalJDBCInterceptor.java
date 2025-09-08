@@ -295,6 +295,9 @@ public class UniversalJDBCInterceptor {
                 recordQueryInHistory(connectionId, sql, extractSQLType(sql), executionTimeMs);
             }
             
+            // 암시적 트랜잭션 감지 - Connection의 AutoCommit 상태 확인
+            checkAndDetectImplicitTransaction(target, connectionId, threadName);
+            
             // 트랜잭션 시작 감지 및 기록
             handleTransactionBeginIfNeeded(sql, connectionId, threadName);
             
@@ -411,21 +414,37 @@ public class UniversalJDBCInterceptor {
         try {
             String connectionId = getConnectionId(target);
             boolean autoCommit = args.length > 0 ? (Boolean) args[0] : true;
+            String threadName = Thread.currentThread().getName();
             
-            System.out.println("🔍 AutoCommit 모드 변경: " + connectionId + " → " + autoCommit + 
-                             " (" + (executionTime / 1_000_000) + "ms)");
+            System.out.println("🔍 setAutoCommit 인터셉트 감지: " + connectionId + " → " + autoCommit + 
+                             " (" + (executionTime / 1_000_000) + "ms) [Thread: " + threadName + "]");
+            logger.debug("[KubeDB] setAutoCommit called: connectionId={}, autoCommit={}, thread={}", 
+                        connectionId, autoCommit, threadName);
             
             // Long-running transaction 감지를 위한 트랜잭션 상태 변경 기록
-            metricsCollector.recordTransactionStateChange(autoCommit, executionTime);
+            metricsCollector.recordTransactionStateChange(autoCommit, executionTime, connectionId);
             
             // AutoCommit이 false로 설정되면 트랜잭션 시작으로 간주
             if (!autoCommit) {
-                String transactionId = "tx-" + System.currentTimeMillis();
-                System.out.println("🚀 트랜잭션 시작 감지: " + connectionId + " (txId: " + transactionId + ")");
+                String transactionId = generateTransactionId(connectionId, threadName);
+                boolean transactionStarted = metricsCollector.recordTransactionBegin(connectionId, transactionId);
+                
+                if (transactionStarted) {
+                    System.out.println("🚀 트랜잭션 시작 감지 (setAutoCommit): " + connectionId + " (txId: " + transactionId + ")");
+                    logger.info("[KubeDB] Transaction started via setAutoCommit: {} on connection {}", 
+                               transactionId, connectionId);
+                } else {
+                    System.out.println("ℹ️ 트랜잭션 이미 활성화됨: " + connectionId);
+                    logger.debug("[KubeDB] Transaction already active on connection {}", connectionId);
+                }
+            } else {
+                System.out.println("🔚 AutoCommit 활성화 - 트랜잭션 종료: " + connectionId);
+                logger.debug("[KubeDB] AutoCommit enabled, ending transaction on connection {}", connectionId);
             }
             
         } catch (Exception e) {
-            logger.error("Error handling setAutoCommit: {}", e.getMessage());
+            System.out.println("❌ setAutoCommit 처리 중 오류: " + e.getMessage());
+            logger.error("Error handling setAutoCommit: {}", e.getMessage(), e);
         }
     }
     
@@ -1124,6 +1143,50 @@ public class UniversalJDBCInterceptor {
             System.out.println("❌ DataSource 등록 실패: " + e.getMessage());
         }
         return false;
+    }
+    
+    /**
+     * 암시적 트랜잭션 감지 - Connection의 AutoCommit 상태 확인
+     */
+    private static void checkAndDetectImplicitTransaction(Object target, String connectionId, String threadName) {
+        if (metricsCollector == null) {
+            return;
+        }
+        
+        try {
+            // Connection 객체 추출
+            java.sql.Connection connection = null;
+            
+            if (target instanceof java.sql.Connection) {
+                connection = (java.sql.Connection) target;
+            } else if (target instanceof java.sql.Statement) {
+                connection = ((java.sql.Statement) target).getConnection();
+            }
+            
+            if (connection != null) {
+                boolean autoCommit = connection.getAutoCommit();
+                
+                System.out.println("🔍 Connection AutoCommit 상태 확인: " + connectionId + " → " + autoCommit);
+                logger.debug("[KubeDB] Checking connection autoCommit: connectionId={}, autoCommit={}", 
+                           connectionId, autoCommit);
+                
+                // AutoCommit이 false이고 아직 트랜잭션이 기록되지 않은 경우 암시적 트랜잭션으로 간주
+                if (!autoCommit && !metricsCollector.hasActiveTransaction(connectionId)) {
+                    String transactionId = generateTransactionId(connectionId, threadName);
+                    boolean transactionStarted = metricsCollector.recordTransactionBegin(connectionId, transactionId);
+                    
+                    if (transactionStarted) {
+                        System.out.println("🚀 암시적 트랜잭션 시작 감지: " + connectionId + " (txId: " + transactionId + ")");
+                        logger.info("[KubeDB] Implicit transaction started: {} on connection {}", 
+                                   transactionId, connectionId);
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            System.out.println("❌ 암시적 트랜잭션 감지 중 오류: " + e.getMessage());
+            logger.debug("Error detecting implicit transaction: {}", e.getMessage());
+        }
     }
     
     /**

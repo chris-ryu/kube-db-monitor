@@ -26,6 +26,11 @@ export interface TransactionEvent {
   stored_procedure?: string        // Stored Procedure 이름
   query_history?: QueryHistoryInfo[] // 쿼리 실행 히스토리
   
+  // Agent에서 실제로 보내는 필드들 (primary)
+  transaction_duration: number    // Agent: transactionDuration
+  sql_pattern: string             // Agent: sqlPattern (쿼리 내용)
+  execution_time_ms: number       // Agent: executionTimeMs
+  
   // 성능 메트릭
   cpu_time_ms?: number
   memory_used_bytes?: number

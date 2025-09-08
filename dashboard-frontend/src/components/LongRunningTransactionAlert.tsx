@@ -1,5 +1,9 @@
 import React, { useState } from 'react'
-import { TransactionEvent, QueryHistoryInfo } from '@/types/transaction'
+import { TransactionEvent } from '@/types/transaction'
+import { Clock, Eye, Database, User, Play } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
 
 interface LongRunningTransactionAlertProps {
   transactions: TransactionEvent[]
@@ -11,366 +15,169 @@ interface LongRunningTransactionAlertProps {
 export function LongRunningTransactionAlert({ 
   transactions, 
   onKillTransaction, 
-  thresholdSeconds = 5,
+  thresholdSeconds = 2,
   className = '' 
 }: LongRunningTransactionAlertProps) {
+  const [selectedTransaction, setSelectedTransaction] = useState<TransactionEvent | null>(null)
   const thresholdMs = thresholdSeconds * 1000
 
   const longRunningTransactions = transactions.filter(tx => 
-    tx.status === 'active' && tx.duration_ms && tx.duration_ms >= thresholdMs
+    tx.status === 'active' && tx.transaction_duration >= thresholdMs
   )
 
-  if (longRunningTransactions.length === 0) {
-    return (
-      <div className={`bg-green-900/20 border border-green-800 rounded-lg p-4 ${className}`}>
-        <div className="flex items-center space-x-3">
-          <span className="text-2xl">✅</span>
-          <div>
-            <h3 className="text-green-400 font-semibold">All Transactions Running Normally</h3>
-            <p className="text-green-300/70 text-sm">
-              No long-running transactions detected (threshold: {thresholdSeconds}s)
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className={`space-y-4 ${className}`}>
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-yellow-400 flex items-center space-x-2">
-          <span>⚠️</span>
-          <span>Long Running Transactions</span>
-        </h2>
-        <span className="bg-yellow-900/50 text-yellow-300 px-3 py-1 rounded-full text-sm">
-          {longRunningTransactions.length} transactions over {thresholdSeconds}s
-        </span>
-      </div>
-
-      <div className="space-y-3">
-        {longRunningTransactions
-          .sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0)) // Sort by duration desc
-          .map((transaction) => (
-            <LongRunningTransactionCard 
-              key={transaction.id} 
-              transaction={transaction} 
-              onKill={onKillTransaction}
-              thresholdMs={thresholdMs}
-            />
-          ))}
-      </div>
-    </div>
-  )
-}
-
-function LongRunningTransactionCard({ 
-  transaction, 
-  onKill,
-  thresholdMs 
-}: { 
-  transaction: TransactionEvent
-  onKill?: (id: string) => void
-  thresholdMs: number
-}) {
-  const getSeverity = (durationMs: number) => {
-    if (durationMs > thresholdMs * 3) return 'critical' // > 15m (if threshold is 5m)
-    if (durationMs > thresholdMs * 2) return 'warning'  // > 10m
-    return 'info' // > threshold but < 2x threshold
-  }
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'border-red-500 bg-red-900/20'
-      case 'warning': return 'border-yellow-500 bg-yellow-900/20'
-      default: return 'border-blue-500 bg-blue-900/20'
-    }
-  }
-
-  const getSeverityBadge = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'bg-red-600 text-white'
-      case 'warning': return 'bg-yellow-600 text-white'
-      default: return 'bg-blue-600 text-white'
-    }
+  const getDurationColor = (duration: number) => {
+    if (duration > 4000) return "text-red-400 bg-red-500/10"
+    if (duration > 2000) return "text-orange-400 bg-orange-500/10"
+    return "text-yellow-400 bg-yellow-500/10"
   }
 
   const formatDuration = (ms: number) => {
-    if (ms < 60000) return `${Math.round(ms / 1000)}s`
-    if (ms < 3600000) return `${(ms / 60000).toFixed(1)}m`
-    return `${(ms / 3600000).toFixed(1)}h`
+    if (ms > 1000) return `${(ms / 1000).toFixed(1)}s`
+    return `${ms}ms`
   }
-
-  const calculateEfficiency = (executionMs: number, totalMs: number) => {
-    return Math.round((executionMs / totalMs) * 100)
-  }
-
-  const severity = getSeverity(transaction.duration_ms || 0)
-  const efficiency = calculateEfficiency(
-    transaction.total_execution_time_ms, 
-    transaction.duration_ms || 1
-  )
 
   return (
-    <div className={`border rounded-lg p-4 ${getSeverityColor(severity)}`}>
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${getSeverityBadge(severity)}`}>
-              {severity}
-            </span>
-            <span className="font-mono text-blue-300">
-              {transaction.transaction_id}
-            </span>
-            {transaction.pod_name && (
-              <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">
-                Pod: {transaction.pod_name}
-              </span>
-            )}
-            {transaction.namespace && (
-              <span className="bg-gray-600 text-gray-300 px-2 py-1 rounded text-xs">
-                {transaction.namespace}
-              </span>
-            )}
-          </div>
-          <p className="text-gray-300 mt-1 text-sm">
-            Running for <strong>{formatDuration(transaction.duration_ms || 0)}</strong> • 
-            <span className="ml-1">{transaction.query_count} queries</span>
-            {transaction.current_query && (
-              <span className="ml-2 text-blue-400">• 🔍 SQL captured</span>
-            )}
-            {transaction.stored_procedure && (
-              <span className="ml-2 text-purple-400">• 📋 Stored procedure</span>
-            )}
-          </p>
-        </div>
-        
-        {onKill && (
-          <button
-            onClick={() => onKill(transaction.transaction_id)}
-            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition-colors"
-          >
-            Kill
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div>
-          <p className="text-gray-400">Started</p>
-          <p className="text-gray-200">
-            {new Date(transaction.start_time).toLocaleTimeString()}
-          </p>
-        </div>
-        
-        <div>
-          <p className="text-gray-400">Query Execution</p>
-          <p className="text-gray-200">
-            {formatDuration(transaction.total_execution_time_ms)}
-          </p>
-        </div>
-        
-        <div>
-          <p className="text-gray-400">Efficiency</p>
-          <p className={`font-semibold ${
-            efficiency > 80 ? 'text-green-400' :
-            efficiency > 50 ? 'text-yellow-400' : 'text-red-400'
-          }`}>
-            {efficiency}%
-          </p>
-        </div>
-
-        <div>
-          <p className="text-gray-400">Status</p>
-          <div className="flex items-center space-x-1">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-            <span className="text-blue-300">Active</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 현재 실행 중인 쿼리 표시 */}
-      {transaction.current_query ? (
-        <div className="mt-4 pt-4 border-t border-gray-700">
-          <div className="flex items-center space-x-2 mb-2">
-            <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-            <p className="text-sm text-blue-400 font-semibold">Currently executing query:</p>
-          </div>
-          <div className="bg-blue-900/20 border border-blue-700 rounded p-3">
-            <div className="font-mono text-xs text-blue-300 whitespace-pre-wrap break-words">
-              {transaction.current_query}
+    <>
+      <div className="glass-morphism rounded-2xl p-6 bg-gradient-to-br from-orange-500/10 to-yellow-500/10 border border-orange-500/20 transform hover:scale-105 transition-transform duration-300">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-gradient-to-r from-orange-500/20 to-yellow-500/20">
+              <Clock className="w-5 h-5 text-orange-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Long-Running Transactions</h3>
+              <p className="text-white/60 text-sm">Transactions running &gt; {thresholdSeconds} seconds</p>
             </div>
           </div>
+          <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">
+            {longRunningTransactions.length} active
+          </Badge>
         </div>
-      ) : (
-        <div className="mt-4 pt-4 border-t border-gray-700">
-          <div className="flex items-center space-x-2 mb-2">
-            <span className="w-2 h-2 bg-gray-500 rounded-full"></span>
-            <p className="text-sm text-gray-500 font-semibold">SQL Query Information:</p>
-          </div>
-          <div className="bg-yellow-900/20 border border-yellow-700 rounded p-3">
-            <div className="flex items-center space-x-2">
-              <span className="text-yellow-500">⏳</span>
-              <div className="text-xs text-yellow-400">
-                <strong>SQL data collection in progress...</strong>
-                <div className="text-yellow-300/70 mt-1">
-                  The Agent is working to capture SQL query information for this long-running transaction.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Stored Procedure 표시 */}
-      {transaction.stored_procedure && (
-        <div className="mt-4 pt-4 border-t border-gray-700">
-          <p className="text-sm text-gray-400 mb-2">Stored Procedure:</p>
-          <div className="bg-purple-900/20 border border-purple-700 rounded p-2">
-            <div className="font-mono text-sm text-purple-300 font-semibold">
-              {transaction.stored_procedure}
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* 쿼리 히스토리 표시 */}
-      {transaction.query_history && transaction.query_history.length > 0 && (
-        <QueryHistorySection queryHistory={transaction.query_history} />
-      )}
-      
-      {/* 최근 쿼리 목록 표시 */}
-      {transaction.queries.length > 0 && (
-        <div className="mt-4 pt-4 border-t border-gray-700">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-400">Recent queries in this transaction:</p>
-            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
-              {transaction.queries.length} total
-            </span>
-          </div>
-          <div className="space-y-2 max-h-40 overflow-y-auto">
-            {transaction.queries
-              .slice(-3) // Show last 3 queries
-              .reverse()  // Most recent first
-              .map((query, index) => (
-                <div key={query.query_id || index} className="bg-gray-800/50 rounded p-2 border border-gray-600">
-                  <div className="flex items-start justify-between mb-1">
-                    <span className={`px-2 py-1 rounded text-xs font-bold ${
-                      query.sql_type === 'SELECT' ? 'bg-green-700 text-green-100' :
-                      query.sql_type === 'INSERT' ? 'bg-blue-700 text-blue-100' :
-                      query.sql_type === 'UPDATE' ? 'bg-yellow-700 text-yellow-100' :
-                      query.sql_type === 'DELETE' ? 'bg-red-700 text-red-100' :
-                      'bg-gray-700 text-gray-100'
-                    }`}>
-                      {query.sql_type}
+
+        <div className="space-y-3 max-h-80 overflow-y-auto">
+          {longRunningTransactions.map((transaction) => (
+            <div
+              key={transaction.id}
+              className="glass-morphism rounded-lg p-4 border border-white/10 hover:border-orange-500/30 transition-all duration-200 group cursor-pointer"
+              onClick={() => setSelectedTransaction(transaction)}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Play className="w-3 h-3 text-green-400 animate-pulse" />
+                    <span className="text-white/80 text-sm font-medium">
+                      #{transaction.transaction_id || transaction.id}
                     </span>
-                    <div className="text-right">
-                      <div className="text-xs text-gray-400">
-                        {new Date(query.timestamp).toLocaleTimeString()}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatDuration(query.execution_time_ms)}
-                      </div>
-                      {query.rows_affected !== undefined && (
-                        <div className="text-xs text-blue-400">
-                          {query.rows_affected} rows
-                        </div>
-                      )}
+                    <Badge className={`text-xs ${getDurationColor(transaction.transaction_duration)}`}>
+                      {formatDuration(transaction.transaction_duration)}
+                    </Badge>
+                  </div>
+                  
+                  <p className="text-white/60 text-sm truncate mb-2">
+                    {transaction.sql_pattern || transaction.current_query || 'Long running transaction detected'}
+                  </p>
+                  
+                  <div className="flex items-center gap-4 text-xs text-white/40">
+                    <div className="flex items-center gap-1">
+                      <Database className="w-3 h-3" />
+                      {transaction.pod_name || 'Unknown'}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <User className="w-3 h-3" />
+                      {transaction.namespace || 'Unknown'}
                     </div>
                   </div>
-                  <div className="font-mono text-xs text-gray-300 whitespace-pre-wrap break-words">
-                    {query.sql_pattern.length > 150 ? 
-                      `${query.sql_pattern.substring(0, 150)}...` : 
-                      query.sql_pattern
-                    }
-                  </div>
-                  {query.status === 'error' && query.error_message && (
-                    <div className="mt-1 text-xs text-red-400 bg-red-900/20 border border-red-800 rounded p-1">
-                      ❌ {query.error_message}
-                    </div>
-                  )}
                 </div>
-              ))}
-          </div>
-        </div>
-      )}
-
-      {efficiency < 30 && (
-        <div className="mt-3 p-3 bg-red-900/30 border border-red-700 rounded">
-          <div className="flex items-center space-x-2">
-            <span className="text-red-400">⚠️</span>
-            <p className="text-red-300 text-sm">
-              <strong>Low efficiency detected!</strong> This transaction is spending most of its time waiting.
-              Consider checking for locks or connection issues.
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function QueryHistorySection({ queryHistory }: { queryHistory: QueryHistoryInfo[] }) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  
-  const formatDuration = (ms: number) => {
-    if (ms < 1000) return `${ms}ms`
-    if (ms < 60000) return `${Math.round(ms / 1000)}s`
-    if (ms < 3600000) return `${(ms / 60000).toFixed(1)}m`
-    return `${(ms / 3600000).toFixed(1)}h`
-  }
-
-  const formatTimestamp = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString()
-  }
-
-  return (
-    <div className="mt-4 pt-4 border-t border-gray-700">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-sm text-gray-400">
-          Query History ({queryHistory.length} queries)
-        </p>
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-        >
-          {isExpanded ? '접기' : '펼치기'}
-        </button>
-      </div>
-      
-      {isExpanded && (
-        <div className="space-y-2 max-h-60 overflow-y-auto">
-          {queryHistory.map((query, index) => (
-            <div key={index} className="bg-gray-800/50 rounded p-2 border border-gray-600">
-              <div className="flex items-start justify-between mb-1">
-                <span className={`px-2 py-1 rounded text-xs font-bold ${
-                  query.query_type === 'SELECT' ? 'bg-green-700 text-green-100' :
-                  query.query_type === 'INSERT' ? 'bg-blue-700 text-blue-100' :
-                  query.query_type === 'UPDATE' ? 'bg-yellow-700 text-yellow-100' :
-                  query.query_type === 'DELETE' ? 'bg-red-700 text-red-100' :
-                  'bg-gray-700 text-gray-100'
-                }`}>
-                  {query.query_type}
-                </span>
-                <div className="text-right">
-                  <div className="text-xs text-gray-400">
-                    {formatTimestamp(query.start_time)}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {formatDuration(query.execution_time)}
-                  </div>
-                </div>
-              </div>
-              <div className="font-mono text-xs text-gray-300 whitespace-pre-wrap">
-                {query.query.length > 200 ? 
-                  `${query.query.substring(0, 200)}...` : 
-                  query.query
-                }
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8"
+                >
+                  <Eye className="w-4 h-4 text-white/60" />
+                </Button>
               </div>
             </div>
           ))}
+          
+          {longRunningTransactions.length === 0 && (
+            <div className="text-center py-8">
+              <Clock className="w-8 h-8 text-white/20 mx-auto mb-2" />
+              <p className="text-white/40 text-sm">No long-running transactions</p>
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+
+      <Dialog open={!!selectedTransaction} onOpenChange={() => setSelectedTransaction(null)}>
+        <DialogContent className="glass-morphism border border-white/20 bg-gradient-to-br from-slate-900/90 to-slate-800/90 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Clock className="w-5 h-5 text-orange-400" />
+              Transaction Details
+            </DialogTitle>
+          </DialogHeader>
+          {selectedTransaction && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-white/60 text-sm">Transaction ID</p>
+                  <p className="text-white font-medium">{selectedTransaction.transaction_id || selectedTransaction.id}</p>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">Status</p>
+                  <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+                    {selectedTransaction.status}
+                  </Badge>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">Duration</p>
+                  <p className="text-orange-400 font-bold">{formatDuration(selectedTransaction.transaction_duration)}</p>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">Database</p>
+                  <p className="text-white font-medium">{selectedTransaction.pod_name || 'Unknown'}</p>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">User Session</p>
+                  <p className="text-white font-medium">{selectedTransaction.transaction_id || 'Unknown'}</p>
+                </div>
+                <div>
+                  <p className="text-white/60 text-sm">Started</p>
+                  <p className="text-white font-medium">
+                    {selectedTransaction.start_time ? new Date(selectedTransaction.start_time).toLocaleString() : 'Unknown'}
+                  </p>
+                </div>
+              </div>
+              
+              <div>
+                <p className="text-white/60 text-sm mb-2">SQL Query</p>
+                <div className="glass-morphism rounded-lg p-4 bg-black/20 border border-white/10">
+                  <code className="text-white/80 text-sm whitespace-pre-wrap">
+                    {selectedTransaction.sql_pattern || selectedTransaction.current_query || 'Long running transaction detected'}
+                  </code>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" className="border-white/20 text-white hover:bg-white/10">
+                  View Execution Plan
+                </Button>
+                {onKillTransaction && (
+                  <Button 
+                    className="bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30"
+                    onClick={() => {
+                      onKillTransaction(selectedTransaction.transaction_id || selectedTransaction.id)
+                      setSelectedTransaction(null)
+                    }}
+                  >
+                    Kill Transaction
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

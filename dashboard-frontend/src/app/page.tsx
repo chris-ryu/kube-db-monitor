@@ -5,8 +5,18 @@ import { QueryMetrics, AggregatedMetrics } from '@/types/metrics'
 import { TransactionEvent } from '@/types/transaction'
 import { DeadlockEvent } from '@/types/deadlock'
 import { DeadlockAlert } from '@/components/DeadlockAlert'
+import { TransactionTimeline } from '@/components/TransactionTimeline'
 import { LongRunningTransactionAlert } from '@/components/LongRunningTransactionAlert'
 import { ConnectionPoolDetail } from '@/components/ConnectionPoolDetail'
+import { LivePerformanceChart } from '@/components/LivePerformanceChart'
+import { 
+  Activity, 
+  Database, 
+  Clock, 
+  Users, 
+  Zap, 
+  AlertTriangle 
+} from "lucide-react"
 
 
 export default function Dashboard() {
@@ -180,6 +190,10 @@ export default function Dashboard() {
         total_execution_time_ms: Math.floor(tpsValue * 50),
         pod_name: newMetric.pod_name || 'unknown-pod',
         namespace: 'production',
+        // Agent 필수 필드들
+        transaction_duration: Math.floor(tpsValue * 100),
+        sql_pattern: `High TPS detected: ${tpsValue.toFixed(1)} queries/second`,
+        execution_time_ms: Math.floor(tpsValue * 10),
         queries: [{
           query_id: `tps-query-${Date.now()}`,
           sequence_number: 1,
@@ -210,6 +224,11 @@ export default function Dashboard() {
         total_execution_time_ms: Math.floor((newMetric.data?.transaction_duration || 7000) * 0.7),
         pod_name: newMetric.pod_name || 'unknown-pod',
         namespace: newMetric.namespace || 'production',
+        
+        // Agent 필수 필드들
+        transaction_duration: newMetric.data?.transaction_duration || 7000,
+        sql_pattern: newMetric.data?.sql_pattern || 'Long running transaction detected',
+        execution_time_ms: newMetric.data?.execution_time_ms || 7000,
         
         // 🎯 SQL 쿼리 정보 매핑 추가
         current_query: newMetric.data?.current_query || undefined,
@@ -278,7 +297,10 @@ export default function Dashboard() {
       status: rawDeadlockData?.status || 'active',
       pod_name: rawDeadlockData?.pod_name,
       namespace: rawDeadlockData?.namespace || 'unknown',
-      cycleLength: rawDeadlockData?.cycleLength || 2
+      cycleLength: rawDeadlockData?.cycleLength || 2,
+      // Control Plane 필수 필드들
+      duration_ms: rawDeadlockData?.duration_ms || rawDeadlockData?.deadlockDuration || 5000,
+      connections: rawDeadlockData?.connections || rawDeadlockData?.deadlockConnections || 'unknown'
     }
     
     console.log('🎯 Converted deadlock event:', deadlockEvent)
@@ -421,6 +443,10 @@ export default function Dashboard() {
         total_execution_time_ms: 6 * 60000,
         pod_name: 'registration-service-1',
         namespace: 'production',
+        // Agent 필수 필드들
+        transaction_duration: 8 * 60000,
+        sql_pattern: 'SELECT * FROM users WHERE email = ? FOR UPDATE',
+        execution_time_ms: 8 * 60000,
         queries: [
           {
             query_id: 'q-1',
@@ -444,6 +470,10 @@ export default function Dashboard() {
         total_execution_time_ms: 75000,
         pod_name: 'enrollment-service-2',
         namespace: 'production',
+        // Agent 필수 필드들
+        transaction_duration: 90000,
+        sql_pattern: 'INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)',
+        execution_time_ms: 90000,
         queries: []
       }
     ]
@@ -454,6 +484,9 @@ export default function Dashboard() {
       participants: ['tx-user-update-1', 'tx-enrollment-batch-2'],
       detectionTime: new Date(Date.now() - 30000).toISOString(), // 30 seconds ago
       recommendedVictim: 'tx-enrollment-batch-2',
+      // Control Plane 필수 필드들
+      duration_ms: 5000,
+      connections: 'PgConnection@ac889df:PgConnection@139539a4',
       lockChain: [
         'tx-user-update-1 → users table (row_id: 123)',
         'tx-enrollment-batch-2 → enrollments table (user_id: 123)',
@@ -493,29 +526,38 @@ export default function Dashboard() {
   )
 
   return (
-    <div className="min-h-screen bg-gray-900 text-green-400 p-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen relative overflow-hidden">
+      {/* Animated Background Gradients */}
+      <div className="fixed inset-0 bg-slate-900">
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-600/20 via-pink-500/10 to-cyan-500/20"></div>
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-gradient-to-r from-violet-500/30 to-purple-500/30 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-0 right-1/4 w-80 h-80 bg-gradient-to-r from-cyan-500/30 to-blue-500/30 rounded-full blur-3xl animate-pulse delay-1000"></div>
+        <div className="absolute top-1/2 left-1/2 w-64 h-64 bg-gradient-to-r from-pink-500/20 to-rose-500/20 rounded-full blur-3xl animate-pulse delay-500"></div>
+      </div>
+      
+      <div className="max-w-7xl mx-auto relative z-10 p-6">
         {/* Header */}
-        <header className="mb-8">
-          <h1 className="text-4xl font-bold text-center mb-4">
-            {dashboardConfig.title}
-          </h1>
-          <div className="text-center">
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-white mb-2">FlowLight DB Monitor</h1>
+          <p className="text-white/60 text-lg mb-4">
+            실시간 데이터베이스 성능 인사이트
+          </p>
+          <div className="glass-morphism inline-block px-6 py-3 rounded-xl">
+            <span className={`inline-flex items-center text-sm font-medium ${
               isConnected 
-                ? 'bg-green-900 text-green-300' 
-                : 'bg-red-900 text-red-300'
+                ? 'text-green-300' 
+                : 'text-red-300'
             }`}>
-              <div className={`w-2 h-2 rounded-full mr-2 ${
-                isConnected ? 'bg-green-400' : 'bg-red-400'
+              <div className={`w-3 h-3 rounded-full mr-3 animate-pulse ${
+                isConnected ? 'bg-green-400 shadow-neon' : 'bg-red-400 shadow-neon-red'
               }`}></div>
-              {isConnected ? 'Connected' : 'Demo Mode'}
+              {isConnected ? '🔗 Connected' : '🔄 Demo Mode'}
             </span>
           </div>
-        </header>
+        </div>
 
         {/* Primary Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           <MetricCard
             title="QPS"
             value={aggregatedMetrics.qps.toString()}
@@ -548,96 +590,45 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* Live Performance Chart */}
+        <div className="mb-12">
+          <LivePerformanceChart aggregatedMetrics={aggregatedMetrics} />
+        </div>
+
 
         {/* Connection Pool Details */}
-        <div className="mb-8">
-          <ConnectionPoolDetail aggregatedMetrics={aggregatedMetrics} />
+        <div className="mb-12">
+          <div className="glass-morphism rounded-2xl p-8 transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/10">
+            <ConnectionPoolDetail aggregatedMetrics={aggregatedMetrics} />
+          </div>
         </div>
 
         {/* Alert Panels */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          <DeadlockAlert 
-            deadlocks={deadlocks} 
-            onResolve={handleResolveDeadlock}
-          />
-          <LongRunningTransactionAlert 
-            transactions={longRunningTransactions}
-            onKillTransaction={handleKillTransaction}
-            thresholdSeconds={dashboardConfig.longRunningThresholdMs / 1000}
-          />
-        </div>
-
-
-
-        {/* Recent Queries Table */}
-        <div>
-          <h2 className="text-2xl font-semibold mb-4 text-center">
-            📋 Recent Queries
-          </h2>
-          <div className="bg-gray-800 rounded-lg border border-green-800">
-            <div className="p-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-green-800">
-                    <th className="text-left p-2">Time</th>
-                    <th className="text-left p-2">Pod</th>
-                    <th className="text-left p-2">Type</th>
-                    <th className="text-left p-2">Pattern</th>
-                    <th className="text-left p-2">Latency</th>
-                    <th className="text-left p-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {metrics
-                    .filter(m => (m.event_type === 'query_execution' || m.event_type === 'tps_event' || m.event_type === 'long_running_transaction') && m.data)
-                    .slice(0, 10)
-                    .map((query, index) => (
-                    <tr 
-                      key={`${query.data?.query_id}-${index}`}
-                      className="border-b border-gray-700 hover:bg-gray-750"
-                    >
-                      <td className="p-2">
-                        {new Date(query.timestamp).toLocaleTimeString()}
-                      </td>
-                      <td className="p-2">
-                        <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">
-                          {query.pod_name || 'N/A'}
-                        </span>
-                      </td>
-                      <td className="p-2">
-                        {query.event_type === 'tps_event' ? 'TPS_EVENT' : 
-                         query.event_type === 'long_running_transaction' ? 'LONG_TX' : 
-                         query.data?.sql_type || 'OTHER'}
-                      </td>
-                      <td className="p-2 font-mono text-xs">
-                        {query.data?.sql_pattern?.substring(0, 50) || 'N/A'}...
-                      </td>
-                      <td className="p-2">
-                        {query.data?.execution_time_ms || 0}ms
-                      </td>
-                      <td className="p-2">
-                        <span className={`px-2 py-1 rounded text-xs ${
-                          query.data?.status === 'SUCCESS' 
-                            ? 'bg-green-900 text-green-300' 
-                            : 'bg-red-900 text-red-300'
-                        }`}>
-                          {query.data?.status || 'UNKNOWN'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {metrics.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="text-center p-8 text-gray-500">
-                        No queries yet... Waiting for data 📊
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+          <div className="glass-morphism rounded-2xl p-6 transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/10">
+            <DeadlockAlert 
+              deadlocks={deadlocks} 
+              onResolve={handleResolveDeadlock}
+            />
+          </div>
+          <div className="glass-morphism rounded-2xl p-6 transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/10">
+            <LongRunningTransactionAlert 
+              transactions={longRunningTransactions}
+              onKillTransaction={handleKillTransaction}
+              thresholdSeconds={dashboardConfig.longRunningThresholdMs / 1000}
+            />
           </div>
         </div>
+
+        {/* Transaction Timeline */}
+        <div className="mb-12">
+          <div className="glass-morphism rounded-2xl p-8 transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/10">
+            <TransactionTimeline transactions={transactions} />
+          </div>
+        </div>
+
+
+
       </div>
     </div>
   )
@@ -654,14 +645,69 @@ function MetricCard({
   unit: string
   isAnimated: boolean
 }) {
+  const getCardConfig = (title: string) => {
+    switch (title) {
+      case 'QPS': return {
+        icon: Activity,
+        color: 'from-blue-500/20 to-cyan-500/20',
+        borderColor: 'border-white/20'
+      }
+      case 'TPS': return {
+        icon: Zap,
+        color: 'from-purple-500/20 to-pink-500/20',
+        borderColor: 'border-white/20'
+      }
+      case 'Avg Latency': {
+        const latency = parseFloat(value)
+        return {
+          icon: Clock,
+          color: latency > 30 ? 'from-orange-500/20 to-yellow-500/20' : 'from-emerald-500/20 to-green-500/20',
+          borderColor: latency > 30 ? 'border-orange-500/30' : 'border-white/20'
+        }
+      }
+      case 'Active Transactions': return {
+        icon: Database,
+        color: 'from-indigo-500/20 to-blue-500/20',
+        borderColor: 'border-white/20'
+      }
+      case 'Error Rate': {
+        const errorRate = parseFloat(value)
+        return {
+          icon: AlertTriangle,
+          color: errorRate > 2 ? 'from-red-500/20 to-pink-500/20' : 'from-orange-500/20 to-red-500/20',
+          borderColor: errorRate > 2 ? 'border-red-500/30' : 'border-white/20'
+        }
+      }
+      default: return {
+        icon: Activity,
+        color: 'from-violet-500/20 to-purple-500/20',
+        borderColor: 'border-white/20'
+      }
+    }
+  }
+
+  const config = getCardConfig(title)
+
   return (
-    <div className={`bg-gray-800 rounded-lg p-6 border border-green-800 ${
-      isAnimated ? 'animate-pulse' : ''
-    }`}>
-      <h3 className="text-sm font-medium text-gray-400 mb-2">{title}</h3>
-      <div className="flex items-end space-x-2">
-        <span className="text-2xl font-bold text-green-400">{value}</span>
-        <span className="text-xs text-gray-500">{unit}</span>
+    <div className="group transform hover:-translate-y-1 hover:scale-105 transition-all duration-300">
+      <div className={`glass-morphism rounded-2xl p-6 bg-gradient-to-br ${config.color} ${config.borderColor} transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/10`}>
+        <div className="flex items-start justify-between mb-4">
+          <div className={`p-3 rounded-xl bg-gradient-to-br ${config.color} backdrop-blur-sm`}>
+            <config.icon className="w-6 h-6 text-white" />
+          </div>
+        </div>
+        
+        <div className="space-y-2">
+          <h3 className="text-white/80 text-sm font-medium">{title}</h3>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold text-white">
+              {typeof value === 'string' && !isNaN(parseFloat(value)) 
+                ? parseFloat(value).toFixed(title === "Error Rate" ? 2 : 0) 
+                : value}
+            </span>
+            <span className="text-white/60 text-sm">{unit}</span>
+          </div>
+        </div>
       </div>
     </div>
   )

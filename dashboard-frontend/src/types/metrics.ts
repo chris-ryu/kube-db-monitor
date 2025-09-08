@@ -263,6 +263,20 @@ export interface PoolUsagePattern {
   response_time_ms: number
 }
 
+// Live Performance Chart Data
+export interface PerformanceDataPoint {
+  timestamp: number
+  connectionPool: number  // percentage (0-100)
+  tps: number            // transactions per second
+  latency: number        // milliseconds
+}
+
+export interface ChartMetrics {
+  dataPoints: PerformanceDataPoint[]
+  maxDataPoints: number
+  timeRange: number      // in seconds
+}
+
 // 대시보드 설정 타입
 export interface DashboardConfig {
   refresh_interval: number // seconds

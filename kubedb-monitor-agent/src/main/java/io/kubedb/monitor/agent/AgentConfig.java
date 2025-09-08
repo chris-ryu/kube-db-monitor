@@ -290,6 +290,20 @@ public class AgentConfig {
     public boolean isSafeTransformationMode() { return safeTransformationMode; }
     public String getLogLevel() { return logLevel; }
     
+    /**
+     * Control Plane endpoint 반환
+     */
+    public String getControlPlaneEndpoint() { 
+        return collectorEndpoint != null ? collectorEndpoint : "http://localhost:8080";
+    }
+    
+    /**
+     * Default configuration으로 AgentConfig 생성
+     */
+    public static AgentConfig load() {
+        return new Builder().build();
+    }
+    
     public static class Builder {
         private boolean enabled = DEFAULT_ENABLED;
         private double samplingRate = DEFAULT_SAMPLING_RATE;

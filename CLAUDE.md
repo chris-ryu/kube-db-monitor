@@ -4,6 +4,8 @@ docs/agent-jdbc-compatibility-guide.md 파일 참조해서 수정 진행
 
 falllback 코드 작성시 물어보고 진행 할 것.
 mocking 코드 작성시 물어보고 진행 할 것.
+**❌ "안전모드", "safe mode", "fallback code" 등의 코드를 사용자에게 알리지 않고 함부로 추가하는 것을 금지한다.**
+**❌ 이전에 정상 작동하던 코드를 안전성을 이유로 임의 수정하는 것을 금지한다.**
 한글로 답변
 docker image 업데이트하면 실행 버전이 최신 버전인지 항상 확인
 
@@ -147,3 +149,42 @@ make demo-deadlock # 데드락 시뮬레이션
 5. **PostgreSQL 호환성**: Unknown Types 오류 해결 및 안전 모드 지원
 
 **📝 기존에 작동하던 기능이 Agent 수정 후 중단되는 사례가 빈발하므로, 이 테스트 규정을 엄격히 준수해야 합니다.**
+
+## 🛠️ **Agent JAR 경로 및 배포 설정 (중요)**
+
+**⚠️ Agent JAR 경로 관련 자주 발생하는 실수를 방지하기 위한 명확한 규칙:**
+
+### 1. Agent JAR 파일 경로 고정 규칙
+```bash
+# ✅ 올바른 Agent JAR 경로 (JAVA_OPTS에서 사용)
+/opt/kubedb-agent/kubedb-monitor-agent.jar
+
+# ❌ 잘못된 경로들 (사용 금지)
+/opt/shared-agent/kubedb-monitor-agent.jar  # initContainer에서 복사하는 임시 경로
+/app/kubedb-monitor-agent.jar               # 잘못된 위치
+```
+
+### 2. Kubernetes 배포 YAML 설정 검증 포인트
+```yaml
+# ✅ 올바른 JAVA_OPTS 설정
+env:
+- name: JAVA_OPTS
+  value: "-javaagent:/opt/kubedb-agent/kubedb-monitor-agent.jar=..."
+
+# ✅ initContainer는 올바른 Agent 이미지 사용
+initContainers:
+- name: kubedb-agent-init
+  image: registry.bitgaram.info/kubedb-monitor/agent:latest
+  # Agent 이미지 내부에서 /opt/kubedb-agent/에 JAR 파일이 이미 위치함
+```
+
+### 3. Agent 초기화 검증 방법
+```bash
+# Agent 로드 확인 (정상 시 나타나야 할 로그)
+🚀 KubeDB Monitor Agent starting...
+🔧 ByteBuddy Agent Builder 설정 중...
+🔍 Connection 클래스 발견: [실제 Connection 구현체 클래스명]
+✅ ByteBuddy Agent Builder 설치 완료
+```
+
+**❌ initContainer에서 Agent JAR 복사 작업을 임의로 수정하지 말 것. Agent 이미지에서 이미 올바른 위치에 JAR 파일이 배치됨.**
