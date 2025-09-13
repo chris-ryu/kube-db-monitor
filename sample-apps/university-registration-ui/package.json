@@ -23,7 +23,7 @@
     "postcss": "^8.4.0",
     "lucide-react": "^0.290.0",
     "clsx": "^2.0.0",
-    "axios": "^1.6.0"
+    "axios": "^1.12.1"
   },
   "devDependencies": {
     "@types/node": "^20.8.0",
