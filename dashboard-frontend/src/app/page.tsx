@@ -9,6 +9,7 @@ import { TransactionTimeline } from '@/components/TransactionTimeline'
 import { LongRunningTransactionAlert } from '@/components/LongRunningTransactionAlert'
 import { ConnectionPoolDetail } from '@/components/ConnectionPoolDetail'
 import { LivePerformanceChart } from '@/components/LivePerformanceChart'
+import RecordingControls from '@/components/RecordingControls'
 import { 
   Activity, 
   Database, 
@@ -30,6 +31,9 @@ export default function Dashboard() {
   const [transactions, setTransactions] = useState<TransactionEvent[]>([])
   const [deadlocks, setDeadlocks] = useState<DeadlockEvent[]>([])
   const [isConnected, setIsConnected] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordedMetrics, setRecordedMetrics] = useState<QueryMetrics[]>([])
+  const [recordedTransactions, setRecordedTransactions] = useState<TransactionEvent[]>([])
   const [aggregatedMetrics, setAggregatedMetrics] = useState<AggregatedMetrics>({
     qps: 0,
     avg_latency: 0,
@@ -176,6 +180,11 @@ export default function Dashboard() {
   const processMetric = (newMetric: QueryMetrics) => {
     console.log('➕ Adding new metric to state:', newMetric.event_type, newMetric.data?.query_id)
     
+    // Record data if recording is active
+    if (isRecording) {
+      setRecordedMetrics(prev => [...prev, newMetric])
+    }
+    
     // Handle TPS events - convert to TransactionEvent for Timeline display
     if (newMetric.event_type === 'tps_event') {
       console.log('🚀 Processing TPS event:', newMetric)
@@ -266,6 +275,11 @@ export default function Dashboard() {
   }
 
   const processTransactionEvent = (transactionEvent: TransactionEvent) => {
+    // Record data if recording is active
+    if (isRecording) {
+      setRecordedTransactions(prev => [...prev, transactionEvent])
+    }
+    
     setTransactions(prev => {
       const existing = prev.find(t => t.transaction_id === transactionEvent.transaction_id)
       if (existing) {
@@ -382,14 +396,16 @@ export default function Dashboard() {
     const averageHoldTime = latestMetric?.metrics?.connection_pool_average_hold_time ?? 0
     const waitingThreads = latestMetric?.metrics?.connection_pool_waiting_threads ?? 0
     
-    // Calculate transactions per second based on query metrics
-    // Fix status check - Control-plane sends 'completed', not 'SUCCESS'
-    const successfulQueries = queryMetrics.filter(m => 
-      m.data?.status === 'completed' || m.data?.status === 'SUCCESS'
+    // TPS 계산: transaction_event (COMMIT/ROLLBACK)를 사용
+    const transactionEvents = recentMetrics.filter(m =>
+      m.event_type === 'transaction_event' &&
+      (m.data?.transaction_type === 'COMMIT' || m.data?.transaction_type === 'ROLLBACK')
     )
-    const tps = successfulQueries.length / 60
-    
-    console.log('✅ Successful queries:', successfulQueries.length)
+
+    // TPS 계산 (최근 1분간 트랜잭션 수 / 60초)
+    const tps = transactionEvents.length / 60
+
+    console.log('✅ Transaction events (last 1min):', transactionEvents.length, 'TPS:', tps.toFixed(2))
     
     const newMetrics: AggregatedMetrics = {
       qps: Math.round(qps * 100) / 100,
@@ -525,24 +541,34 @@ export default function Dashboard() {
     t.status === 'active' && t.duration_ms && t.duration_ms >= dashboardConfig.longRunningThresholdMs
   )
 
+  // Recording handlers
+  const handleStartRecording = () => {
+    setIsRecording(true)
+    setRecordedMetrics([])
+    setRecordedTransactions([])
+    console.log('🎬 Started recording monitoring session')
+  }
+
+  const handleStopRecording = () => {
+    setIsRecording(false)
+    const recordedData = {
+      metrics: recordedMetrics,
+      transactions: recordedTransactions
+    }
+    console.log('⏹️ Stopped recording. Recorded data:', recordedData)
+    return recordedData
+  }
+
   return (
     <div className="min-h-screen relative overflow-hidden">
-      {/* Animated Background Gradients */}
-      <div className="fixed inset-0 bg-slate-900">
-        <div className="absolute inset-0 bg-gradient-to-br from-purple-600/20 via-pink-500/10 to-cyan-500/20"></div>
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-gradient-to-r from-violet-500/30 to-purple-500/30 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-0 right-1/4 w-80 h-80 bg-gradient-to-r from-cyan-500/30 to-blue-500/30 rounded-full blur-3xl animate-pulse delay-1000"></div>
-        <div className="absolute top-1/2 left-1/2 w-64 h-64 bg-gradient-to-r from-pink-500/20 to-rose-500/20 rounded-full blur-3xl animate-pulse delay-500"></div>
-      </div>
-      
       <div className="max-w-7xl mx-auto relative z-10 p-6">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">FlowLight DB Monitor</h1>
+          <h1 className="text-4xl font-bold text-white mb-2">실시간 모니터링</h1>
           <p className="text-white/60 text-lg mb-4">
-            실시간 데이터베이스 성능 인사이트
+            데이터베이스 성능 및 트랜잭션 모니터링
           </p>
-          <div className="glass-morphism inline-block px-6 py-3 rounded-xl">
+          <div className="glass-morphism inline-block px-6 py-3 rounded-xl mb-4">
             <span className={`inline-flex items-center text-sm font-medium ${
               isConnected 
                 ? 'text-green-300' 
@@ -555,6 +581,15 @@ export default function Dashboard() {
             </span>
           </div>
         </div>
+
+        {/* Recording Controls */}
+        <RecordingControls
+          isRecording={isRecording}
+          onStartRecording={handleStartRecording}
+          onStopRecording={handleStopRecording}
+          metrics={recordedMetrics}
+          transactions={recordedTransactions}
+        />
 
         {/* Primary Metrics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">

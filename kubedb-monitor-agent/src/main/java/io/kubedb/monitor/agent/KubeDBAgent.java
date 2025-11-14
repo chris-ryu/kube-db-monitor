@@ -132,6 +132,22 @@ public class KubeDBAgent {
                         .intercept(MethodDelegation.to(UniversalJDBCInterceptor.class));
                 })
                 
+                // Spring Transaction Manager 인터셉트
+                .type(ElementMatchers.nameStartsWith("org.springframework.transaction.support.AbstractPlatformTransactionManager")
+                     .or(ElementMatchers.nameStartsWith("org.springframework.orm.jpa.JpaTransactionManager"))
+                     .or(ElementMatchers.nameStartsWith("org.springframework.jdbc.datasource.DataSourceTransactionManager")))
+                .transform((builder, type, classLoader, module, protectionDomain) -> {
+                    System.out.println("🔍 Spring Transaction Manager 클래스 발견: " + type.getName());
+                    return builder
+                        .method(ElementMatchers.named("getTransaction")
+                               .or(ElementMatchers.named("commit"))
+                               .or(ElementMatchers.named("rollback")))
+                        .intercept(MethodDelegation.to(SpringTransactionInterceptor.class));
+                })
+                
+                // JPA EntityManager 인터셉트는 Spring Transaction Manager에서 이미 처리됨
+                // Hibernate SessionImpl getTransaction 메서드 중복 방지를 위해 비활성화
+                
                 .installOn(inst);
                 
             System.out.println("✅ ByteBuddy Agent Builder 설치 완료");

@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -97,6 +101,207 @@ type WebSocketMessage struct {
 	Type      string      `json:"type"`
 	Data      interface{} `json:"data"`
 	Timestamp string      `json:"timestamp"`
+}
+
+// MonitoringSession represents a recorded monitoring session
+type MonitoringSession struct {
+	ID              string        `json:"id"`
+	SessionName     string        `json:"session_name"`
+	Description     string        `json:"description,omitempty"`
+	StartTime       string        `json:"start_time"`
+	EndTime         string        `json:"end_time,omitempty"`
+	Status          string        `json:"status"` // recording, completed
+	DurationMinutes int           `json:"duration_minutes,omitempty"`
+	MetricsData     []interface{} `json:"metrics_data"`
+	TransactionsData []interface{} `json:"transactions_data"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+}
+
+// SessionStorage handles persistent storage of monitoring sessions
+type SessionStorage struct {
+	basePath string
+}
+
+// NewSessionStorage creates a new session storage instance
+func NewSessionStorage(basePath string) *SessionStorage {
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(basePath, 0755); err != nil {
+		log.Printf("❌ Failed to create sessions directory: %v", err)
+		return nil
+	}
+	
+	return &SessionStorage{
+		basePath: basePath,
+	}
+}
+
+// Create saves a new monitoring session
+func (s *SessionStorage) Create(session *MonitoringSession) error {
+	session.CreatedAt = time.Now()
+	session.UpdatedAt = time.Now()
+	
+	if session.ID == "" {
+		session.ID = fmt.Sprintf("session-%d", time.Now().UnixNano())
+	}
+	
+	return s.save(session)
+}
+
+// Update modifies an existing monitoring session
+func (s *SessionStorage) Update(id string, updates map[string]interface{}) error {
+	session, err := s.GetByID(id)
+	if err != nil {
+		return err
+	}
+	
+	// Apply updates
+	if sessionName, ok := updates["session_name"].(string); ok {
+		session.SessionName = sessionName
+	}
+	if description, ok := updates["description"].(string); ok {
+		session.Description = description
+	}
+	if endTime, ok := updates["end_time"].(string); ok {
+		session.EndTime = endTime
+	}
+	if status, ok := updates["status"].(string); ok {
+		session.Status = status
+	}
+	if durationMinutes, ok := updates["duration_minutes"].(int); ok {
+		session.DurationMinutes = durationMinutes
+	}
+	if metricsData, ok := updates["metrics_data"].([]interface{}); ok {
+		session.MetricsData = metricsData
+	}
+	if transactionsData, ok := updates["transactions_data"].([]interface{}); ok {
+		session.TransactionsData = transactionsData
+	}
+	
+	session.UpdatedAt = time.Now()
+	return s.save(session)
+}
+
+// GetByID retrieves a session by its ID
+func (s *SessionStorage) GetByID(id string) (*MonitoringSession, error) {
+	filePath := filepath.Join(s.basePath, id+".json")
+	
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("session not found: %s", id)
+	}
+	
+	var session MonitoringSession
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("failed to parse session: %v", err)
+	}
+	
+	return &session, nil
+}
+
+// List retrieves all sessions with optional sorting
+func (s *SessionStorage) List(sortBy string, limit int) ([]*MonitoringSession, error) {
+	files, err := ioutil.ReadDir(s.basePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sessions directory: %v", err)
+	}
+	
+	var sessions []*MonitoringSession
+	
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+		
+		id := strings.TrimSuffix(file.Name(), ".json")
+		session, err := s.GetByID(id)
+		if err != nil {
+			log.Printf("⚠️ Failed to load session %s: %v", id, err)
+			continue
+		}
+		
+		sessions = append(sessions, session)
+	}
+	
+	// Sort sessions
+	switch sortBy {
+	case "-created_date":
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].CreatedAt.After(sessions[j].CreatedAt)
+		})
+	case "-updated_date":
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+		})
+	default:
+		// Default sort by created date descending
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].CreatedAt.After(sessions[j].CreatedAt)
+		})
+	}
+	
+	// Apply limit
+	if limit > 0 && len(sessions) > limit {
+		sessions = sessions[:limit]
+	}
+	
+	return sessions, nil
+}
+
+// Delete removes a session
+func (s *SessionStorage) Delete(id string) error {
+	filePath := filepath.Join(s.basePath, id+".json")
+	
+	if err := os.Remove(filePath); err != nil {
+		return fmt.Errorf("failed to delete session %s: %v", id, err)
+	}
+	
+	log.Printf("✅ Deleted session: %s", id)
+	return nil
+}
+
+// save persists a session to disk
+func (s *SessionStorage) save(session *MonitoringSession) error {
+	filePath := filepath.Join(s.basePath, session.ID+".json")
+	
+	data, err := json.MarshalIndent(session, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal session: %v", err)
+	}
+	
+	if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write session file: %v", err)
+	}
+	
+	log.Printf("💾 Saved session: %s", session.ID)
+	return nil
+}
+
+// CleanupOldSessions removes sessions older than specified days
+func (s *SessionStorage) CleanupOldSessions(retentionDays int) error {
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	
+	sessions, err := s.List("", 0)
+	if err != nil {
+		return err
+	}
+	
+	deletedCount := 0
+	for _, session := range sessions {
+		if session.CreatedAt.Before(cutoff) {
+			if err := s.Delete(session.ID); err != nil {
+				log.Printf("⚠️ Failed to cleanup session %s: %v", session.ID, err)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+	
+	if deletedCount > 0 {
+		log.Printf("🧹 Cleaned up %d old sessions", deletedCount)
+	}
+	
+	return nil
 }
 
 type Hub struct {
@@ -465,6 +670,146 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Session API Handlers
+
+func handleCreateSession(storage *SessionStorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var session MonitoringSession
+		if err := json.NewDecoder(r.Body).Decode(&session); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		// Validate required fields
+		if session.SessionName == "" {
+			http.Error(w, "Session name is required", http.StatusBadRequest)
+			return
+		}
+		
+		if err := storage.Create(&session); err != nil {
+			log.Printf("❌ Failed to create session: %v", err)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+		
+		log.Printf("✅ Created new session: %s", session.SessionName)
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(session)
+	}
+}
+
+func handleListSessions(storage *SessionStorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sortBy := r.URL.Query().Get("sort")
+		if sortBy == "" {
+			sortBy = "-created_date"
+		}
+		
+		limitStr := r.URL.Query().Get("limit")
+		limit := 0
+		if limitStr != "" {
+			if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
+				limit = parsedLimit
+			}
+		}
+		
+		sessions, err := storage.List(sortBy, limit)
+		if err != nil {
+			log.Printf("❌ Failed to list sessions: %v", err)
+			http.Error(w, "Failed to list sessions", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sessions)
+	}
+}
+
+func handleGetSession(storage *SessionStorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+		
+		session, err := storage.GetByID(id)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, "Session not found", http.StatusNotFound)
+			} else {
+				log.Printf("❌ Failed to get session %s: %v", id, err)
+				http.Error(w, "Failed to get session", http.StatusInternalServerError)
+			}
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+	}
+}
+
+func handleUpdateSession(storage *SessionStorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+		
+		var updates map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		if err := storage.Update(id, updates); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, "Session not found", http.StatusNotFound)
+			} else {
+				log.Printf("❌ Failed to update session %s: %v", id, err)
+				http.Error(w, "Failed to update session", http.StatusInternalServerError)
+			}
+			return
+		}
+		
+		// Return updated session
+		session, err := storage.GetByID(id)
+		if err != nil {
+			log.Printf("❌ Failed to get updated session %s: %v", id, err)
+			http.Error(w, "Session updated but failed to retrieve", http.StatusInternalServerError)
+			return
+		}
+		
+		log.Printf("✅ Updated session: %s", id)
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+	}
+}
+
+func handleDeleteSession(storage *SessionStorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+		
+		if err := storage.Delete(id); err != nil {
+			if strings.Contains(err.Error(), "no such file") {
+				http.Error(w, "Session not found", http.StatusNotFound)
+			} else {
+				log.Printf("❌ Failed to delete session %s: %v", id, err)
+				http.Error(w, "Failed to delete session", http.StatusInternalServerError)
+			}
+			return
+		}
+		
+		log.Printf("✅ Deleted session: %s", id)
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Session deleted successfully",
+			"id":      id,
+		})
+	}
+}
+
 func main() {
 	log.Printf("🎉 KubeDB Monitor Control Plane starting...")
 	
@@ -473,6 +818,34 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	
+	// Initialize session storage
+	sessionsPath := os.Getenv("SESSIONS_STORAGE_PATH")
+	if sessionsPath == "" {
+		sessionsPath = "/tmp/sessions" // fallback for local development
+	}
+	
+	sessionStorage := NewSessionStorage(sessionsPath)
+	if sessionStorage == nil {
+		log.Fatalf("❌ Failed to initialize session storage")
+	}
+	
+	log.Printf("💾 Session storage initialized at: %s", sessionsPath)
+	
+	// Start cleanup routine for old sessions
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour) // Run daily
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ticker.C:
+				if err := sessionStorage.CleanupOldSessions(30); err != nil {
+					log.Printf("⚠️ Session cleanup failed: %v", err)
+				}
+			}
+		}
+	}()
 	
 	hub := newHub()
 	go hub.run()
@@ -485,6 +858,13 @@ func main() {
 	router.HandleFunc("/ws", hub.handleWebSocket)
 	router.HandleFunc("/api/health", healthHandler).Methods("GET")
 	router.HandleFunc("/api/metrics", hub.receiveMetrics).Methods("POST")
+	
+	// Session management routes
+	router.HandleFunc("/api/sessions", handleCreateSession(sessionStorage)).Methods("POST")
+	router.HandleFunc("/api/sessions", handleListSessions(sessionStorage)).Methods("GET")
+	router.HandleFunc("/api/sessions/{id}", handleGetSession(sessionStorage)).Methods("GET")
+	router.HandleFunc("/api/sessions/{id}", handleUpdateSession(sessionStorage)).Methods("PUT")
+	router.HandleFunc("/api/sessions/{id}", handleDeleteSession(sessionStorage)).Methods("DELETE")
 	
 	// Serve static files for dashboard (if needed)
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./static/")))

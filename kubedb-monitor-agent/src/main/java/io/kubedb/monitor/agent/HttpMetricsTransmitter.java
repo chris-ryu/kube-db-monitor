@@ -403,6 +403,43 @@ public class HttpMetricsTransmitter {
             queryInfoFields = queryFields.toString();
         }
         
+        // 실제 SQL 쿼리 추출 로직 개선
+        String actualSqlPattern = "Long running transaction";
+        
+        // 1순위: 매개변수로 전달된 currentQuery 사용
+        if (currentQuery != null && !currentQuery.trim().isEmpty()) {
+            actualSqlPattern = currentQuery.replace("\"", "\\\"").replace("\n", "\\n");
+        } 
+        // 2순위: Connection ID 기반으로 활성 쿼리 조회
+        else {
+            try {
+                Object activeQueryInfo = UniversalJDBCInterceptor.getActiveQueryByConnection(connectionId);
+                if (activeQueryInfo != null) {
+                    String activeSql = extractSqlFromActiveQueryInfo(activeQueryInfo);
+                    if (activeSql != null && !activeSql.trim().isEmpty() && !activeSql.equals("SQL data collection in progress...")) {
+                        actualSqlPattern = activeSql.replace("\"", "\\\"").replace("\n", "\\n");
+                        logger.info("[KubeDB] 🔍 Connection ID {}에서 실제 SQL 패턴 추출: {}", 
+                                   connectionId, activeSql.substring(0, Math.min(50, activeSql.length())));
+                    }
+                }
+                
+                // 3순위: Thread Name 기반으로 활성 쿼리 조회 (백업)
+                if (actualSqlPattern.equals("Long running transaction")) {
+                    Object threadBasedQuery = UniversalJDBCInterceptor.getActiveQueryByThread(threadName);
+                    if (threadBasedQuery != null) {
+                        String threadSql = extractSqlFromActiveQueryInfo(threadBasedQuery);
+                        if (threadSql != null && !threadSql.trim().isEmpty() && !threadSql.equals("SQL data collection in progress...")) {
+                            actualSqlPattern = threadSql.replace("\"", "\\\"").replace("\n", "\\n");
+                            logger.info("[KubeDB] 🔍 Thread {}에서 실제 SQL 패턴 추출: {}", 
+                                       threadName, threadSql.substring(0, Math.min(50, threadSql.length())));
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("[KubeDB] SQL 패턴 추출 실패, 기본값 사용: {}", e.getMessage());
+            }
+        }
+
         return String.format(
             "{" +
             "\"timestamp\": \"%s\"," +
@@ -433,7 +470,7 @@ public class HttpMetricsTransmitter {
             durationMs,
             threadName,
             startTime,
-            currentQuery != null ? currentQuery.replace("\"", "\\\"") : "Long running transaction",
+            actualSqlPattern,
             queryInfoFields
         );
     }

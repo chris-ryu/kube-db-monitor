@@ -29,6 +29,8 @@ spec:
           value: "8080"
         - name: LOG_LEVEL
           value: "INFO"
+        - name: SESSIONS_STORAGE_PATH
+          value: "/data/sessions"
         resources:
           requests:
             memory: "128Mi"
@@ -36,6 +38,9 @@ spec:
           limits:
             memory: "256Mi"
             cpu: "500m"
+        volumeMounts:
+        - name: sessions-storage
+          mountPath: /data/sessions
         livenessProbe:
           httpGet:
             path: /api/health
@@ -48,6 +53,10 @@ spec:
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 5
+      volumes:
+      - name: sessions-storage
+        persistentVolumeClaim:
+          claimName: kubedb-monitor-sessions-storage
 
 ---
 apiVersion: apps/v1
@@ -83,6 +92,8 @@ spec:
           value: "ws://kubedb-monitor-control-plane:8080"
         - name: NEXT_PUBLIC_WS_URL
           value: "wss://kube-db-mon-controlplane.bitgaram.info/ws"
+        - name: NEXT_PUBLIC_CONTROL_PLANE_URL
+          value: "https://kube-db-mon-controlplane.bitgaram.info"
         - name: NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS
           value: "5000"
         - name: NEXT_PUBLIC_DASHBOARD_TITLE
@@ -148,6 +159,20 @@ spec:
 
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kubedb-monitor-sessions-storage
+  namespace: kubedb-monitor
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: nfs-client
+
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: kubedb-monitor-config
@@ -168,6 +193,11 @@ data:
       health:
         enabled: true
         endpoint: /api/health
+    storage:
+      sessions:
+        path: /data/sessions
+        retention_days: 30
+        max_size_gb: 8
     logging:
       level: INFO
       format: json
@@ -176,9 +206,9 @@ data:
   dashboard.env: |
     NODE_ENV=production
     NEXT_PUBLIC_LONG_RUNNING_THRESHOLD_MS=5000
-    NEXT_PUBLIC_DASHBOARD_TITLE=🚀 Advanced KubeDB Monitor Dashboard
+    NEXT_PUBLIC_DASHBOARD_TITLE=FlowLight DB Monitor
     CONTROL_PLANE_URL=ws://kubedb-monitor-control-plane:8080
     WEBSOCKET_URL=wss://kube-db-mon-controlplane.bitgaram.info/ws
   
   # Dashboard Title
-  dashboard.title: "🚀 FlowLight DB Monitor Dashboard"
+  dashboard.title: "FlowLight DB Monitor"

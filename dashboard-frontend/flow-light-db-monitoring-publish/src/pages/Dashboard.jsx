@@ -8,6 +8,9 @@ import LongRunningTransactions from "../components/dashboard/LongRunningTransact
 import LiveMetricsChart from "../components/dashboard/LiveMetricsChart";
 import RecordingControls from "../components/dashboard/RecordingControls";
 
+// WebSocket hook for real-time data (disabled for now due to import path issues)
+// import { useRealTimeMetrics } from "../hooks/useRealTimeMetrics";
+
 // Mock data generator for real-time simulation
 const generateMockMetrics = () => ({
   qps: Math.floor(Math.random() * 1000) + 500,
@@ -47,9 +50,11 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState(generateMockMetrics());
   const [metricsHistory, setMetricsHistory] = useState([]);
   const [transactions, setTransactions] = useState(generateMockTransactions());
+  const [realLongRunningTransactions, setRealLongRunningTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [recordedData, setRecordedData] = useState({ metrics: [], transactions: [] });
+  const [wsConnectionStatus, setWsConnectionStatus] = useState('disconnected');
 
   useEffect(() => {
     // Initialize with some historical data
@@ -59,6 +64,72 @@ export default function Dashboard() {
     }));
     setMetricsHistory(initialHistory);
     setIsLoading(false);
+
+    // WebSocket connection for real-time Long-running Transaction data
+    const wsUrl = 'ws://kube-db-mon-controlplane.bitgaram.info/ws';
+    let ws = null;
+    
+    const connectWebSocket = () => {
+      try {
+        setWsConnectionStatus('connecting');
+        console.log('🔄 WebSocket 연결 시도:', wsUrl);
+        
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log('✅ WebSocket 연결됨');
+          setWsConnectionStatus('connected');
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            console.log('📥 WebSocket 메시지 수신:', message);
+            
+            // Long-running Transaction 이벤트 처리
+            if (message.type === 'long_running_transaction') {
+              const transactionData = {
+                id: message.data?.transaction_id || `lr_${Date.now()}`,
+                transaction_id: message.data?.transaction_id || 'N/A',
+                query: message.data?.sql_text || 'Long-running query in progress...',
+                duration: message.data?.duration_ms || 0,
+                status: message.data?.status || 'active',
+                database_name: message.data?.database_name || 'postgresql',
+                user_session: message.data?.connection_id || 'unknown',
+                created_date: new Date()
+              };
+              
+              console.log('🐌 Long-running Transaction 추가:', transactionData);
+              setRealLongRunningTransactions(prev => {
+                // 중복 방지를 위해 transaction_id 체크
+                const filtered = prev.filter(t => t.transaction_id !== transactionData.transaction_id);
+                return [transactionData, ...filtered].slice(0, 10); // 최대 10개 유지
+              });
+            }
+          } catch (error) {
+            console.warn('WebSocket 메시지 파싱 실패:', error, event.data);
+          }
+        };
+        
+        ws.onerror = (error) => {
+          console.error('❌ WebSocket 오류:', error);
+          setWsConnectionStatus('error');
+        };
+        
+        ws.onclose = () => {
+          console.log('🔌 WebSocket 연결 종료');
+          setWsConnectionStatus('disconnected');
+          // 3초 후 재연결 시도
+          setTimeout(connectWebSocket, 3000);
+        };
+        
+      } catch (error) {
+        console.error('WebSocket 생성 실패:', error);
+        setWsConnectionStatus('error');
+      }
+    };
+    
+    connectWebSocket();
 
     // Update metrics every 3 seconds
     const metricsInterval = setInterval(() => {
@@ -92,11 +163,17 @@ export default function Dashboard() {
     return () => {
       clearInterval(metricsInterval);
       clearInterval(transactionsInterval);
+      if (ws) {
+        ws.close();
+      }
     };
   }, [isRecording]); // Added isRecording to dependency array
 
   const deadlocks = transactions.filter((t) => t.status === 'failed').slice(0, 5);
   const longRunning = transactions.filter((t) => t.status === 'active' && t.duration > 2000).slice(0, 8);
+  
+  // 실제 WebSocket 데이터가 있으면 우선 사용, 없으면 Mock 데이터 사용
+  const displayLongRunning = realLongRunningTransactions.length > 0 ? realLongRunningTransactions : longRunning;
 
   const handleStartRecording = () => {
     setIsRecording(true);
@@ -155,8 +232,30 @@ export default function Dashboard() {
 
         {/* Transactions Section */}
         <div className="grid lg:grid-cols-2 gap-6">
-          <LongRunningTransactions transactions={longRunning} />
+          <LongRunningTransactions transactions={displayLongRunning} />
           <TransactionTimeline transactions={transactions.slice(0, 10)} />
+        </div>
+        
+        {/* WebSocket 연결 상태 표시 */}
+        <div className="fixed bottom-4 right-4 z-50">
+          <div className={`glass-morphism rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+            wsConnectionStatus === 'connected' ? 'border-green-500/30 bg-green-500/10' :
+            wsConnectionStatus === 'connecting' ? 'border-yellow-500/30 bg-yellow-500/10' :
+            'border-red-500/30 bg-red-500/10'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${
+              wsConnectionStatus === 'connected' ? 'bg-green-400 animate-pulse' :
+              wsConnectionStatus === 'connecting' ? 'bg-yellow-400 animate-spin' :
+              'bg-red-400'
+            }`}></div>
+            <span className="text-white/80">
+              WebSocket: {wsConnectionStatus === 'connected' ? '연결됨' : 
+                         wsConnectionStatus === 'connecting' ? '연결 중...' : '연결 안됨'}
+              {realLongRunningTransactions.length > 0 && (
+                <span className="ml-2 text-green-400">({realLongRunningTransactions.length}개 수신)</span>
+              )}
+            </span>
+          </div>
         </div>
       </div>
     </div>);

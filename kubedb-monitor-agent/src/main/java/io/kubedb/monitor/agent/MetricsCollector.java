@@ -272,6 +272,32 @@ public class MetricsCollector {
     }
     
     /**
+     * Long-running 트랜잭션 기록
+     */
+    public void recordLongRunningTransaction(String transactionId, String connectionId, long durationMs, String transactionType) {
+        if (!config.isEnabled()) {
+            return;
+        }
+        
+        try {
+            logger.info(String.format("[KubeDB] Long-running transaction detected: %s (duration: %dms, type: %s)", 
+                       transactionId, durationMs, transactionType));
+            
+            // HTTP 전송기를 통해 Long-running transaction 알림 전송
+            transmitter.transmitLongRunningTransactionAlert(
+                transactionId, 
+                connectionId, 
+                Thread.currentThread().getName(), 
+                durationMs, 
+                System.currentTimeMillis() - durationMs
+            );
+            
+        } catch (Exception e) {
+            logger.warning("Error recording long-running transaction: " + e.getMessage());
+        }
+    }
+    
+    /**
      * 오류 기록
      */
     public void recordError(String operation, SQLException error) {

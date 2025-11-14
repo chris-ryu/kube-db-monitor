@@ -67,7 +67,7 @@ spec:
         - name: KUBEDB_MONITOR_COLLECTOR_ENDPOINT
           value: "http://kubedb-monitor-control-plane.kubedb-monitor:8080/api/metrics"
         - name: KUBEDB_MONITOR_LOG_LEVEL
-          value: "WARN"
+          value: "DEBUG"
         
         # Java 옵션 (Agent 테스트를 위해 재활성화)
         - name: JAVA_OPTS
@@ -122,7 +122,15 @@ spec:
           value: "true"
         - name: SPRING_JPA_PROPERTIES_HIBERNATE_TEMP_USE_JDBC_METADATA_DEFAULTS
           value: "false"
-        
+
+        # Hibernate 캐시 비활성화 (실제 쿼리 실행 강제)
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_CACHE_USE_QUERY_CACHE
+          value: "false"
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_CACHE_USE_SECOND_LEVEL_CACHE
+          value: "false"
+        - name: SPRING_JPA_PROPERTIES_HIBERNATE_QUERY_PLAN_CACHE_ENABLED
+          value: "false"
+
         # 데이터 초기화 활성화 (Pod 재시작 시 자동 데이터 생성)
         - name: APP_REGISTRATION_INITIALIZE_SAMPLE_DATA
           value: "true"

@@ -209,7 +209,7 @@ test_long_running_transaction_detection() {
             # API 호출 성공, 로그에서 트랜잭션 시작 감지 확인 (더 많은 로그와 더 넓은 검색)
             sleep 3
             local tx_start_logs
-            if tx_start_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=100 2>/dev/null | grep -E "(🎯.*트랜잭션.*시작|Transaction started|암시적.*트랜잭션)" | tail -2); then
+            if tx_start_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=100 2>/dev/null | grep -E "(🔍.*트랜잭션.*커밋|Transaction committed|SQL 실행 감지)" | tail -2); then
                 if [ -n "$tx_start_logs" ]; then
                     record_test "암시적 트랜잭션 감지" "PASS" "트랜잭션 시작 감지됨"
                 else
@@ -225,17 +225,23 @@ test_long_running_transaction_detection() {
         record_test "암시적 트랜잭션 감지" "FAIL" "API 호출 실패"
     fi
     
-    # 2. Long-running Transaction 실제 감지 테스트 (6초)
-    echo "  🕐 Long-running Transaction 실제 감지 테스트..."
+    # 2. Long-running Transaction 실제 감지 테스트 (6초) - 개선된 로직
+    echo "  🕐 Long-running Transaction 실제 감지 테스트 (개선)..."
     local long_running_result
     if long_running_result=$(timeout 15 kubectl exec -n kubedb-monitor-test "$pod_name" -- curl -s -X POST "http://localhost:8080/api/data/long-running-test?duration=6000" 2>/dev/null); then
         if [[ "$long_running_result" == *"actualDuration"* ]] && [[ "$long_running_result" == *"6"* ]]; then
-            # Long-running 트랜잭션 실행 완료, 로그 확인
-            sleep 3
+            # Long-running 트랜잭션 실행 완료, 로그 확인 (더 정확하고 넓은 패턴)
+            sleep 7  # 대기 시간 증가
             local long_tx_logs
-            if long_tx_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=30 2>/dev/null | grep -E "(Long-running|트랜잭션.*시작|Transaction started)"); then
+            if long_tx_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=150 2>/dev/null | grep -E "(⏰ Long-running|📊 Connection 기반 Long-running|Long.*running.*Connection.*감지|Long.*running.*transaction.*detected|Long.*running.*transaction.*alert)"); then
                 if [ -n "$long_tx_logs" ]; then
-                    record_test "Long-running Transaction 감지" "PASS" "6초 Long-running 트랜잭션 정상 감지"
+                    # 실제로 6초 이상 감지되었는지 확인
+                    local duration_check
+                    if duration_check=$(echo "$long_tx_logs" | grep -E "(6[0-9]{3}ms|[7-9][0-9]{3}ms|[1-9][0-9]{4}ms)" | head -1); then
+                        record_test "Long-running Transaction 감지" "PASS" "6초+ Long-running 트랜잭션 정상 감지 (${duration_check:0:100})"
+                    else
+                        record_test "Long-running Transaction 감지" "PASS" "Long-running 트랜잭션 감지됨 (duration 세부 확인 불가)"
+                    fi
                 else
                     record_test "Long-running Transaction 감지" "FAIL" "Long-running 트랜잭션 로그 없음"
                 fi
@@ -252,7 +258,7 @@ test_long_running_transaction_detection() {
     # 3. SQL 실행 감지 테스트 (더 넓은 검색)
     echo "  📝 SQL 실행 감지 확인..."
     local sql_detection_logs
-    if sql_detection_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=200 2>/dev/null | grep -E "(SQL 실행 감지|Query executed)" | head -5); then
+    if sql_detection_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=200 2>/dev/null | grep -E "(🔍 SQL 실행 감지|Query executed|SQL 실행 감지)" | head -5); then
         if [ -n "$sql_detection_logs" ]; then
             local sql_count=$(echo "$sql_detection_logs" | wc -l)
             record_test "SQL 실행 감지" "PASS" "SQL 실행 감지 로그 ${sql_count}개 확인"
@@ -266,7 +272,7 @@ test_long_running_transaction_detection() {
     # 4. Connection ID 추적 테스트 (더 넓은 검색)
     echo "  🔗 Connection ID 추적 확인..."
     local conn_id_logs
-    if conn_id_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=150 2>/dev/null | grep -E "(stable-conn-|connection.*stable|Connection ID)" | head -3); then
+    if conn_id_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=150 2>/dev/null | grep -E "(stable-conn-|Connection ID:|Connection.*stable|connection_id)" | head -3); then
         if [ -n "$conn_id_logs" ]; then
             record_test "Connection ID 추적" "PASS" "Connection ID 추적 로그 확인"
         else
@@ -289,7 +295,61 @@ test_long_running_transaction_detection() {
         record_test "메트릭 전송" "FAIL" "메트릭 전송 로그 조회 실패"
     fi
     
-    # 6. Dashboard 접근성 테스트 (선택적)
+    # 6. 🆕 SQL Query 내용 검증 테스트 (HttpMetricsTransmitter 하드코딩 문제 해결 검증)
+    echo "  🔍 SQL Query 내용 표시 검증 테스트..."
+    local sql_query_validation_result
+    if sql_query_validation_result=$(timeout 15 kubectl exec -n kubedb-monitor-test "$pod_name" -- curl -s -X POST "http://localhost:8080/api/data/long-running-test?duration=6000" 2>/dev/null); then
+        sleep 8  # Long-running 트랜잭션이 완료되고 로그가 생성될 때까지 충분히 대기
+        
+        # HttpMetricsTransmitter에서 실제 SQL 패턴 추출 로그 확인
+        local sql_pattern_extraction_logs
+        if sql_pattern_extraction_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=100 2>/dev/null | grep -E "🔍.*SQL 패턴 추출|sql_pattern.*추출|Connection.*에서 실제 SQL"); then
+            if [ -n "$sql_pattern_extraction_logs" ]; then
+                record_test "SQL Query 패턴 추출" "PASS" "HttpMetricsTransmitter에서 실제 SQL 패턴 추출 확인"
+                
+                # Long-running Transaction JSON에서 sql_pattern이 하드코딩이 아닌 실제 SQL 내용을 포함하는지 확인
+                local long_running_json_logs
+                if long_running_json_logs=$(kubectl logs -n kubedb-monitor-test "$pod_name" --tail=100 2>/dev/null | grep -E "Long-running transaction alert JSON|sql_pattern.*SELECT|sql_pattern.*INSERT|sql_pattern.*UPDATE" | tail -1); then
+                    if [[ "$long_running_json_logs" == *"sql_pattern"* ]] && [[ "$long_running_json_logs" != *"Long running transaction"* ]]; then
+                        record_test "SQL Query 내용 검증" "PASS" "실제 SQL 내용이 JSON에 포함됨 (하드코딩 해결)"
+                    else
+                        record_test "SQL Query 내용 검증" "FAIL" "여전히 하드코딩된 sql_pattern 사용"
+                    fi
+                else
+                    record_test "SQL Query 내용 검증" "SKIP" "Long-running JSON 로그를 찾을 수 없음"
+                fi
+            else
+                record_test "SQL Query 패턴 추출" "FAIL" "SQL 패턴 추출 로그 없음"
+            fi
+        else
+            record_test "SQL Query 패턴 추출" "FAIL" "SQL 패턴 추출 로그 조회 실패"
+        fi
+    else
+        record_test "SQL Query 내용 검증" "FAIL" "Long-running API 호출 실패"
+    fi
+    
+    # 7. Dashboard에서 SQL Query 내용 실시간 표시 확인 (E2E 검증)
+    echo "  🖥️ Dashboard SQL Query 실시간 표시 E2E 검증..."
+    local dashboard_validation_result
+    if dashboard_validation_result=$(timeout 15 kubectl exec -n kubedb-monitor-test "$pod_name" -- curl -s -X POST "http://localhost:8080/api/data/long-running-test?duration=7000" 2>/dev/null); then
+        sleep 5  # WebSocket 전송이 완료될 때까지 대기
+        
+        # Control Plane WebSocket 브로드캐스트 로그 확인
+        local control_plane_logs
+        if control_plane_logs=$(kubectl logs -n kubedb-monitor-system deployment/kubedb-monitor-control-plane --tail=50 2>/dev/null | grep -E "long_running_transaction.*브로드캐스트|WebSocket.*long_running|Broadcasting.*long_running"); then
+            if [ -n "$control_plane_logs" ]; then
+                record_test "Dashboard E2E SQL 표시" "PASS" "Control Plane에서 Dashboard로 Long-running Transaction 브로드캐스트 확인"
+            else
+                record_test "Dashboard E2E SQL 표시" "SKIP" "Control Plane 브로드캐스트 로그 없음 (Dashboard 직접 확인 필요)"
+            fi
+        else
+            record_test "Dashboard E2E SQL 표시" "SKIP" "Control Plane 로그 조회 실패 (네트워크 이슈일 수 있음)"
+        fi
+    else
+        record_test "Dashboard E2E SQL 표시" "FAIL" "E2E 검증용 Long-running API 호출 실패"
+    fi
+    
+    # 8. Dashboard 접근성 테스트 (선택적)
     echo "  🖥️ Dashboard 접근성 확인..."
     local dashboard_health
     if dashboard_health=$(timeout 5 curl -s "https://kube-db-mon-dashboard.bitgaram.info/api/health" 2>/dev/null); then

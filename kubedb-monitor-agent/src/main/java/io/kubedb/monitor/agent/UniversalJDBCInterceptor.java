@@ -29,9 +29,10 @@ public class UniversalJDBCInterceptor {
     private static volatile HttpMetricsTransmitter httpTransmitter;
     private static volatile ConnectionPoolMonitor poolMonitor;
     
-    // 🚨 지연 인터셉션: HikariCP와 PostgreSQL 초기화 완료까지 대기
-    private static volatile boolean databaseInitializationComplete = false;
-    private static final long INITIALIZATION_WAIT_TIME_MS = 30000; // 30초 대기
+    // ✅ 즉시 인터셉션 활성화 (지연 없음)
+    // HikariCP와 PostgreSQL 초기화를 기다릴 필요 없음 - ByteBuddy가 클래스 변환 시점에 인터셉션 설정
+    private static volatile boolean databaseInitializationComplete = true; // 즉시 활성화
+    private static final long INITIALIZATION_WAIT_TIME_MS = 0; // 대기 시간 제거
     private static long agentStartTime = System.currentTimeMillis();
     
     // 이미 등록된 DataSource를 추적하여 중복 등록 방지
@@ -46,6 +47,9 @@ public class UniversalJDBCInterceptor {
     // Connection ID 기반 실행 중인 쿼리 매핑 (connection_id -> ActiveQueryInfo)
     private static final Map<String, ActiveQueryInfo> activeQueriesByConnection = new ConcurrentHashMap<>();
     
+    // Connection 보유 시간 추적 (connection_id -> ConnectionHoldInfo)
+    private static final Map<String, ConnectionHoldInfo> connectionHoldTimes = new ConcurrentHashMap<>();
+    
     // 실행 중인 쿼리 정보 클래스
     private static class ActiveQueryInfo {
         final String sql;
@@ -58,6 +62,38 @@ public class UniversalJDBCInterceptor {
             this.connectionId = connectionId;
             this.startTime = System.currentTimeMillis();
             this.queryType = queryType;
+        }
+    }
+    
+    // Connection 보유 정보 클래스
+    private static class ConnectionHoldInfo {
+        final String connectionId;
+        final String threadName;
+        final long startTime;
+        volatile long lastActivityTime;
+        volatile int queryCount;
+        volatile boolean inTransaction;
+        
+        ConnectionHoldInfo(String connectionId, String threadName) {
+            this.connectionId = connectionId;
+            this.threadName = threadName;
+            this.startTime = System.currentTimeMillis();
+            this.lastActivityTime = this.startTime;
+            this.queryCount = 0;
+            this.inTransaction = false;
+        }
+        
+        void updateActivity() {
+            this.lastActivityTime = System.currentTimeMillis();
+            this.queryCount++;
+        }
+        
+        long getHoldDuration() {
+            return System.currentTimeMillis() - startTime;
+        }
+        
+        boolean isLongRunning(long threshold) {
+            return getHoldDuration() > threshold;
         }
     }
     
@@ -91,15 +127,20 @@ public class UniversalJDBCInterceptor {
             @AllArguments Object[] args,
             @SuperCall Callable<?> callable) throws Exception {
         
-        // PostgreSQL 시스템 메서드 제외 필터 (우선 처리)
-        if (isSystemMethod(method.getName())) {
+        // 🔍 강제 디버깅: 모든 인터셉트 호출 로그
+        String debugMethodName = method.getName();
+        String debugClassName = target != null ? target.getClass().getSimpleName() : "null";
+        System.out.println("🚀 [DEBUG] 인터셉트 진입: " + debugClassName + "." + debugMethodName);
+        logger.info("[KubeDB] 🚀 인터셉트 진입: {}.{}", debugClassName, debugMethodName);
+        
+        // PostgreSQL 시스템 메서드 제외 필터 (우선 처리) - 디버깅 강화
+        if (isSystemMethod(debugMethodName)) {
+            System.out.println("❌ [DEBUG] 시스템 메서드 필터링: " + debugMethodName);
             return callable.call();
         }
         
-        // 🚨 지연 인터셉션: 데이터베이스 초기화 완료 대기
-        if (!isDatabaseInitializationReady()) {
-            return callable.call();
-        }
+        // ✅ 지연 없이 즉시 인터셉션 활성화됨 (초기화 대기 로직 제거)
+        // 실제 메트릭 수집은 metricsCollector가 null이 아닐 때만 수행됨
         
         // MetricsCollector, HttpTransmitter, ConnectionPoolMonitor 지연 초기화
         if (metricsCollector == null) {
@@ -118,6 +159,8 @@ public class UniversalJDBCInterceptor {
         }
         
         if (metricsCollector == null || !KubeDBAgent.getConfig().isEnabled()) {
+            System.out.println("⚠️ [DEBUG] 인터셉트 중단: metricsCollector=" + (metricsCollector == null) + 
+                             ", isEnabled=" + (KubeDBAgent.getConfig() != null ? KubeDBAgent.getConfig().isEnabled() : "null"));
             return callable.call();
         }
         
@@ -257,7 +300,7 @@ public class UniversalJDBCInterceptor {
             
             System.out.println("🔍 SQL 실행 감지: " + sql + " (" + (executionTime / 1_000_000) + "ms)");
             System.out.println("   Connection ID: " + connectionId + ", Thread: " + threadName);
-            logger.debug("[KubeDB] SQL 실행 감지: {} ({}ms)", sql, executionTime / 1_000_000);
+            logger.info("[KubeDB] 🔍 SQL 실행 감지: {} ({}ms)", sql, executionTime / 1_000_000);
             
             // PreparedStatement 생성 관련 잘못된 메트릭 필터링
             // (기존 문자열과 신규 추출 실패 문자열 모두 처리)
@@ -351,6 +394,9 @@ public class UniversalJDBCInterceptor {
                 String connectionId = getConnectionId(target);
                 String threadName = Thread.currentThread().getName();
                 
+                // Connection 보유 시간 추적 시작
+                trackConnectionHold(connectionId, threadName);
+                
                 // PreparedStatement 생성은 별도 메트릭으로 처리 (query_execution이 아님)
                 // 실제 SQL 실행 시간에 영향주지 않도록 분리
                 logger.debug("[KubeDB] PreparedStatement 생성: {} ({}ms)", sql, executionTime / 1_000_000);
@@ -374,6 +420,9 @@ public class UniversalJDBCInterceptor {
             
             System.out.println("🔍 트랜잭션 커밋: " + connectionId + " (" + (executionTime / 1_000_000) + "ms)");
             
+            // Connection 기반 트랜잭션 종료 표시
+            markTransactionEnd(connectionId);
+            
             // 트랜잭션 커밋시 쿼리 히스토리 정리
             clearTransactionHistory(connectionId);
             
@@ -394,6 +443,9 @@ public class UniversalJDBCInterceptor {
             String transactionId = "tx-" + System.currentTimeMillis();
             
             System.out.println("🔍 트랜잭션 롤백: " + connectionId + " (" + (executionTime / 1_000_000) + "ms)");
+            
+            // Connection 기반 트랜잭션 종료 표시
+            markTransactionEnd(connectionId);
             
             // 트랜잭션 롤백시 쿼리 히스토리 정리
             clearTransactionHistory(connectionId);
@@ -429,6 +481,9 @@ public class UniversalJDBCInterceptor {
                 String transactionId = generateTransactionId(connectionId, threadName);
                 boolean transactionStarted = metricsCollector.recordTransactionBegin(connectionId, transactionId);
                 
+                // Connection 기반 트랜잭션 시작 표시
+                markTransactionStart(connectionId);
+                
                 if (transactionStarted) {
                     System.out.println("🚀 트랜잭션 시작 감지 (setAutoCommit): " + connectionId + " (txId: " + transactionId + ")");
                     logger.info("[KubeDB] Transaction started via setAutoCommit: {} on connection {}", 
@@ -440,6 +495,9 @@ public class UniversalJDBCInterceptor {
             } else {
                 System.out.println("🔚 AutoCommit 활성화 - 트랜잭션 종료: " + connectionId);
                 logger.debug("[KubeDB] AutoCommit enabled, ending transaction on connection {}", connectionId);
+                
+                // Connection 기반 트랜잭션 종료 표시
+                markTransactionEnd(connectionId);
             }
             
         } catch (Exception e) {
@@ -457,6 +515,11 @@ public class UniversalJDBCInterceptor {
             String connectionId = getConnectionId(target);
             
             System.out.println("🔍 " + className + " 종료: " + connectionId + " (" + (executionTime / 1_000_000) + "ms)");
+            
+            // Connection인 경우 보유 시간 추적 종료
+            if (className.contains("Connection")) {
+                releaseConnectionHold(connectionId);
+            }
             
             metricsCollector.recordConnectionClose(executionTime, connectionId);
             
@@ -1528,6 +1591,9 @@ public class UniversalJDBCInterceptor {
      * HikariCP 연결 풀 초기화 시 "No results were returned by the query" 오류 방지
      */
     private static boolean isSystemMethod(String methodName) {
+        // 🔍 디버깅: 메서드 필터링 검사
+        boolean isSystem = false;
+        
         // 🚨 1. PostgreSQL 핵심 시스템 메서드들 (HikariCP 호환성 필수)
         if (methodName.equals("getTransactionIsolation") ||
             methodName.equals("setTransactionIsolation") ||
@@ -1665,10 +1731,24 @@ public class UniversalJDBCInterceptor {
             methodName.contains("LazyInit") ||
             methodName.contains("Proxy") ||
             methodName.contains("Session")) {
-            return true;
+            isSystem = true;
         }
         
-        return false;
+        // 🔍 중요: SQL 실행 메서드들은 절대 시스템 메서드로 분류하지 않음
+        if (methodName.equals("execute") || 
+            methodName.equals("executeQuery") || 
+            methodName.equals("executeUpdate") || 
+            methodName.equals("executeBatch")) {
+            isSystem = false;
+            System.out.println("✅ [DEBUG] SQL 실행 메서드 인터셉트 허용: " + methodName);
+        }
+        
+        // 🔍 디버깅: 시스템 메서드 분류 결과
+        if (isSystem) {
+            System.out.println("🔒 [DEBUG] 시스템 메서드 분류: " + methodName);
+        }
+        
+        return isSystem;
     }
     
     /**
@@ -1676,18 +1756,25 @@ public class UniversalJDBCInterceptor {
      * HikariCP와 PostgreSQL 초기화가 완료될 때까지 대기
      */
     private static boolean isDatabaseInitializationReady() {
+        // 🔍 디버깅: 초기화 상태 체크
+        System.out.println("🔍 [DEBUG] 초기화 체크: databaseInitializationComplete=" + databaseInitializationComplete);
+        
         // 이미 초기화가 완료되었다면 true 반환
         if (databaseInitializationComplete) {
+            System.out.println("✅ [DEBUG] 초기화 이미 완료됨");
             return true;
         }
         
         long currentTime = System.currentTimeMillis();
         long elapsedTime = currentTime - agentStartTime;
+        System.out.println("⏱️ [DEBUG] 시간 계산: agentStartTime=" + agentStartTime + ", currentTime=" + currentTime + ", elapsedTime=" + elapsedTime + "ms (" + (elapsedTime/1000) + "초)");
         
-        // 30초가 지났으면 초기화가 완료된 것으로 간주
+        // 5초가 지났으면 초기화가 완료된 것으로 간주 (30초에서 단축)
         if (elapsedTime >= INITIALIZATION_WAIT_TIME_MS) {
-            System.out.println("🚀 [KubeDB] 데이터베이스 초기화 대기 시간 완료 - Agent 인터셉션 활성화");
+            System.out.println("🚀 [KubeDB] 데이터베이스 초기화 대기 시간 완료 - Agent 인터셉션 활성화 (경과시간: " + elapsedTime + "ms, 대기시간: " + (INITIALIZATION_WAIT_TIME_MS/1000) + "초)");
+            System.out.println("🔄 [DEBUG] databaseInitializationComplete를 true로 설정");
             databaseInitializationComplete = true;
+            System.out.println("✅ [DEBUG] databaseInitializationComplete 설정 완료: " + databaseInitializationComplete);
             return true;
         }
         
@@ -1763,5 +1850,123 @@ public class UniversalJDBCInterceptor {
         }
         
         return true; // 다른 DataSource의 경우 준비됨으로 간주
+    }
+    
+    /**
+     * Connection 보유 시간 추적 시작
+     */
+    private static void trackConnectionHold(String connectionId, String threadName) {
+        try {
+            ConnectionHoldInfo holdInfo = connectionHoldTimes.get(connectionId);
+            
+            if (holdInfo == null) {
+                // 새로운 Connection 보유 시작
+                holdInfo = new ConnectionHoldInfo(connectionId, threadName);
+                connectionHoldTimes.put(connectionId, holdInfo);
+                
+                System.out.println("🔗 Connection 보유 시작: " + connectionId + " (Thread: " + threadName + ")");
+                logger.debug("[KubeDB] Connection hold started: {} on thread {}", connectionId, threadName);
+            } else {
+                // 기존 Connection의 활동 업데이트
+                holdInfo.updateActivity();
+                
+                // Long-running connection 감지 (5초 임계값)
+                if (holdInfo.isLongRunning(5000) && holdInfo.queryCount > 1) {
+                    long duration = holdInfo.getHoldDuration();
+                    System.out.println("⏰ Long-running Connection 감지: " + connectionId + 
+                                     " (지속시간: " + duration + "ms, 쿼리수: " + holdInfo.queryCount + ")");
+                    
+                    // Connection이 장시간 보유되고 여러 쿼리를 실행했다면 Long-running transaction으로 간주
+                    // Spring @Transactional 환경에서는 명시적 setAutoCommit(false) 없이도 트랜잭션이 진행됨
+                    if (holdInfo.inTransaction || holdInfo.queryCount > 5) {
+                        recordLongRunningConnectionAsTransaction(holdInfo, duration);
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error tracking connection hold: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Connection 보유 종료 처리
+     */
+    private static void releaseConnectionHold(String connectionId) {
+        try {
+            ConnectionHoldInfo holdInfo = connectionHoldTimes.remove(connectionId);
+            if (holdInfo != null) {
+                long totalDuration = holdInfo.getHoldDuration();
+                System.out.println("🔓 Connection 보유 종료: " + connectionId + 
+                                 " (총 지속시간: " + totalDuration + "ms, 쿼리수: " + holdInfo.queryCount + ")");
+                
+                logger.debug("[KubeDB] Connection hold ended: {} (duration: {}ms, queries: {})", 
+                           connectionId, totalDuration, holdInfo.queryCount);
+            }
+        } catch (Exception e) {
+            logger.error("Error releasing connection hold: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Long-running Connection을 트랜잭션으로 기록
+     */
+    private static void recordLongRunningConnectionAsTransaction(ConnectionHoldInfo holdInfo, long duration) {
+        try {
+            if (metricsCollector != null) {
+                String transactionId = "conn-tx-" + holdInfo.connectionId + "-" + System.currentTimeMillis();
+                
+                // 실행 중인 트랜잭션 정보를 포함한 의미있는 SQL 쿼리 메시지 생성
+                String currentQuery = String.format("Long-running transaction on %s (executed %d queries over %d seconds)", 
+                                                   holdInfo.threadName, 
+                                                   holdInfo.queryCount, 
+                                                   duration / 1000);
+                
+                // Long-running transaction으로 기록 (SQL 정보 포함)
+                metricsCollector.recordLongRunningTransaction(
+                    transactionId,
+                    holdInfo.connectionId,
+                    duration,
+                    currentQuery  // 실제 SQL 쿼리 또는 의미 있는 메시지
+                );
+                
+                System.out.println("📊 Connection 기반 Long-running Transaction 기록: " + transactionId + " (SQL: " + 
+                                 (currentQuery.length() > 50 ? currentQuery.substring(0, 50) + "..." : currentQuery) + ")");
+                logger.info("[KubeDB] Connection-based long-running transaction recorded: {} (duration: {}ms, queries: {})", 
+                           transactionId, duration, holdInfo.queryCount);
+            }
+        } catch (Exception e) {
+            logger.error("Error recording connection-based long-running transaction: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Connection에서 트랜잭션 시작 표시
+     */
+    private static void markTransactionStart(String connectionId) {
+        try {
+            ConnectionHoldInfo holdInfo = connectionHoldTimes.get(connectionId);
+            if (holdInfo != null) {
+                holdInfo.inTransaction = true;
+                System.out.println("🚀 Connection 트랜잭션 시작: " + connectionId);
+            }
+        } catch (Exception e) {
+            logger.error("Error marking transaction start: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Connection에서 트랜잭션 종료 표시
+     */
+    private static void markTransactionEnd(String connectionId) {
+        try {
+            ConnectionHoldInfo holdInfo = connectionHoldTimes.get(connectionId);
+            if (holdInfo != null) {
+                holdInfo.inTransaction = false;
+                System.out.println("✅ Connection 트랜잭션 종료: " + connectionId);
+            }
+        } catch (Exception e) {
+            logger.error("Error marking transaction end: {}", e.getMessage(), e);
+        }
     }
 }

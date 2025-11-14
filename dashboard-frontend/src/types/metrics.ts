@@ -47,6 +47,9 @@ export interface QueryData {
   current_query?: string
   stored_procedure?: string
   query_history?: QueryHistoryInfo[]
+
+  // Transaction event specific fields
+  transaction_type?: 'COMMIT' | 'ROLLBACK' | 'BEGIN'
 }
 
 export interface ExecutionContext {
@@ -121,9 +124,9 @@ export type SqlType =
 
 export type ExecutionStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CANCELLED' | 'completed' | 'error'
 
-export type EventType = 
+export type EventType =
   | 'query_execution'
-  | 'query_start' 
+  | 'query_start'
   | 'query_complete'
   | 'slow_query'
   | 'query_error'
@@ -133,6 +136,9 @@ export type EventType =
   | 'dashboard_access'
   | 'tps_event'
   | 'long_running_transaction'
+  | 'transaction_event'
+  | 'deadlock_event'
+  | 'deadlock_detected'
 
 // WebSocket 메시지 타입
 export interface WebSocketMessage {
