@@ -48,7 +48,7 @@
         <kubernetes.client.version>18.0.1</kubernetes.client.version>
         <asm.version>9.5</asm.version>
         <slf4j.version>2.0.9</slf4j.version>
-        <logback.version>1.4.11</logback.version>
+        <logback.version>1.4.12</logback.version>
         <junit.version>5.10.0</junit.version>
         <mockito.version>5.5.0</mockito.version>
         <assertj.version>3.24.2</assertj.version>
